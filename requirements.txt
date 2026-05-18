@@ -1,0 +1,9 @@
+flet
+requests
+pypdf
+PyMuPDF
+pygame
+python-vlc
+moviepy
+imageio-ffmpeg
+pillow

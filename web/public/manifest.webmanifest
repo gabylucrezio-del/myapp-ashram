@@ -1,0 +1,25 @@
+{
+  "name": "Ashram Ganesha",
+  "short_name": "Ashram",
+  "description": "App de Ashram Ganesha",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#241f18",
+  "theme_color": "#5E5A2E",
+  "icons": [
+    {
+      "src": "/Logo Ashram.webp",
+      "sizes": "192x192",
+      "type": "image/webp",
+      "purpose": "any"
+    },
+    {
+      "src": "/Logo Ashram.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any maskable"
+    }
+  ]
+}

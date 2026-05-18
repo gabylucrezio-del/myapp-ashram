@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "579067179872",
+    "firebase_url": "https://ashramganesha-default-rtdb.firebaseio.com",
+    "project_id": "ashramganesha",
+    "storage_bucket": "ashramganesha.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:579067179872:android:d3e42b52df7404666da405",
+        "android_client_info": {
+          "package_name": "com.gabriel.ashramganesha"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXmRKx05nNsLum2qAtaoDPrSQhsBD7e3A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+
+web/node_modules/
+web/dist/
+node_modules/
+build/
+
+.firebase/
+firebase-debug.log
+*.log
+
+.env
+.env.*
