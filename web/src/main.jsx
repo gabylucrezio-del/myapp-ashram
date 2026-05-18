@@ -35,8 +35,17 @@ createRoot(document.getElementById("root")).render(
   </ErrorBoundary>,
 );
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/pwa-sw.js").catch(() => {});
+  });
+} else if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.getRegistrations?.().then((registrations) => {
+      registrations.forEach((registration) => registration.unregister());
+    });
+    window.caches?.keys?.().then((keys) => {
+      keys.forEach((key) => window.caches.delete(key));
+    });
   });
 }

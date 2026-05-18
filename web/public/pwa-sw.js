@@ -1,10 +1,17 @@
-const CACHE_NAME = "ashram-ganesha-v1";
+const CACHE_NAME = "ashram-ganesha-v3";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/manifest.webmanifest",
-  "/Logo Ashram.webp",
-  "/fondo_app.webp"
+  "/LogoReal.png",
+  "/fondo_app.webp",
+  "/icono_biblioteca.webp",
+  "/icono_blog.webp",
+  "/icono_conocimiento.webp",
+  "/icono_ejercicios.webp",
+  "/icono_meditacion.webp",
+  "/icono_perfil.webp",
+  "/satsang.webp"
 ];
 
 self.addEventListener("install", (event) => {
