@@ -29,7 +29,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -40,13 +40,16 @@ import {
 import { get, onValue, push, ref, remove, set, update } from "firebase/database";
 import { deleteObject, ref as storageRef } from "firebase/storage";
 import { auth, db, storage } from "./firebase";
+import BookStudio from "./BookStudio";
 import CuadernoAshram from "./CuadernoAshram";
+import { parseEpubBuffer } from "./epubParser";
 import {
   cleanText,
   downloadUrl,
   optimizeImageToDataUrl,
   pdfViewerUrl,
   uploadAudio,
+  uploadEpub,
   uploadOptimizedImage,
   uploadPdf,
   youtubeEmbedUrl,
@@ -55,6 +58,7 @@ import {
 const ADMIN_WHATSAPP = "5493562514248";
 const APP_LOGO_SRC = "/LogoReal.png";
 const DRIVE_ARCHIVE_FOLDER_ID = "1O081ln2XnQfDXVQUJaqlHnDOy3NMv1Cg";
+const EpubReader = lazy(() => import("./EpubReader"));
 const DRIVE_ARCHIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${DRIVE_ARCHIVE_FOLDER_ID}`;
 const GOOGLE_DRIVE_API_KEY = import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || "";
 let chatAudioContext = null;
@@ -77,6 +81,7 @@ const adminSections = [
   { id: "blog", label: "Blog", icon: Newspaper, iconSrc: "/icono_blog.webp" },
   { id: "banners", label: "Banners", icon: ImageIcon },
   { id: "usuarios", label: "Usuarios", icon: User },
+  { id: "libros", label: "Libros", icon: BookOpen },
   { id: "cuaderno", label: "Cuaderno", icon: Library },
 ];
 
@@ -525,6 +530,7 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
   const [books, setBooks] = useState([]);
   const [query, setQuery] = useState("");
   const [pdfViewer, setPdfViewer] = useState(null);
+  const [epubViewer, setEpubViewer] = useState(null);
 
   useEffect(() => {
     loadList("biblioteca").then(setBooks);
@@ -558,6 +564,28 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
                 <BookOpen size={16} /> {contentAccessType(book) === "compra" ? "Comprar" : contentAccessType(book) === "suscripcion" ? "Solicitar" : "Leer"}
               </button>
             ) : null}
+            {book.epub_url || book.epub ? (
+              <button
+                className="primary small"
+                type="button"
+                onClick={() => {
+                  if (!canOpenPaidContent(profile, book)) {
+                    onToast?.(accessToast(book));
+                    openAccessWhatsApp(profile, "biblioteca", book);
+                    return;
+                  }
+                  setEpubViewer({
+                    title: book.titulo || "Libro",
+                    url: book.epub_url || book.epub,
+                    path: book.epub_path || "",
+                    chapters: book.epub_chapters || [],
+                    epubTitle: book.epub_title || "",
+                  });
+                }}
+              >
+                <BookOpen size={16} /> Leer EPUB
+              </button>
+            ) : null}
             <button className="ghost compact share-content-button" type="button" onClick={() => onShare?.("biblioteca", book)}>
               <Share2 size={15} /> Compartir
             </button>
@@ -565,6 +593,11 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
         ))}
       </div>
       {pdfViewer ? <PdfModal viewer={pdfViewer} onClose={() => setPdfViewer(null)} /> : null}
+      {epubViewer ? (
+        <Suspense fallback={<div className="modal-backdrop"><div className="reader-loading">Preparando lector EPUB...</div></div>}>
+          <EpubReader viewer={epubViewer} onClose={() => setEpubViewer(null)} />
+        </Suspense>
+      ) : null}
     </section>
   );
 }
@@ -1336,7 +1369,7 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
   const [shareDraft, setShareDraft] = useState(null);
 
   useEffect(() => {
-    if (section === "cuaderno") {
+    if (section === "cuaderno" || section === "libros") {
       setItems([]);
       return;
     }
@@ -1358,6 +1391,7 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
     await remove(ref(db, `${section}/${item.id}`));
     await deleteStoragePath(item.portada_path || item.imagen_path);
     await deleteStoragePath(item.pdf_path);
+    await deleteStoragePath(item.epub_path);
     onToast("Contenido borrado.");
     refresh();
   }
@@ -1372,12 +1406,12 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
           </button>
         ))}
       </div>
-      {section !== "usuarios" && section !== "cuaderno" ? (
+      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" ? (
         <button className="primary" onClick={() => setEditing({})}>
           <Plus size={18} /> Nuevo
         </button>
       ) : null}
-      {editing && section !== "usuarios" && section !== "cuaderno" && (
+      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && (
         <AdminForm
           key={`${section}-${editing.id || "new"}`}
           section={section}
@@ -1404,6 +1438,8 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
             if (draft) setShareDraft(draft);
           }}
         />
+      ) : section === "libros" ? (
+        <BookStudio profile={profile} onToast={onToast} />
       ) : section === "usuarios" ? (
         <UserManagement users={items} onToast={onToast} onRefresh={refresh} />
       ) : (
@@ -1757,6 +1793,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
   const [blogPosts, setBlogPosts] = useState([]);
   const [image, setImage] = useState(null);
   const [pdf, setPdf] = useState(null);
+  const [epub, setEpub] = useState(null);
   const [audioFile, setAudioFile] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -1780,7 +1817,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
     const existingAudio = item.audio_url || item.link_audio || item.audio || item.link_drive;
     if (isMeditation && !audioFile && !cleanText(form.link_drive) && !existingAudio) return onToast("Subi el audio M4A o completa el link de Google Drive.");
     if (!isSatsang && !image && !(item.portada_url || item.imagen)) return onToast("Selecciona una imagen.");
-    if (includePdf && !pdf && !(item.pdf_url || item.pdf)) return onToast("Selecciona un PDF.");
+    if (includePdf && !pdf && !epub && !(item.pdf_url || item.pdf || item.epub_url || item.epub)) return onToast(isBook ? "Selecciona un PDF o EPUB." : "Selecciona un PDF.");
 
     setBusy(true);
     try {
@@ -1863,6 +1900,24 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
         }
       }
 
+      if (isBook) {
+        if (epub) {
+          const parsedEpub = await parseEpubBuffer(await epub.arrayBuffer());
+          const uploaded = await uploadEpub(epub, "biblioteca/epubs");
+          data.epub = uploaded.url;
+          data.epub_url = uploaded.url;
+          data.epub_path = uploaded.path;
+          data.epub_title = parsedEpub.title || cleanText(form.titulo);
+          data.epub_chapters = parsedEpub.chapters;
+        } else {
+          data.epub = item.epub || item.epub_url || "";
+          data.epub_url = item.epub_url || item.epub || "";
+          data.epub_path = item.epub_path || "";
+          data.epub_title = item.epub_title || "";
+          data.epub_chapters = item.epub_chapters || [];
+        }
+      }
+
       let savedId = item.id;
       if (item.id) {
         await update(ref(db, `${section}/${item.id}`), data);
@@ -1915,6 +1970,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
       {!isSatsang ? <FileInput icon={ImageIcon} label="Imagen" file={image} accept="image/jpeg,image/png,image/webp" onChange={setImage} /> : null}
       {isMeditation ? <FileInput icon={Upload} label="Audio M4A" file={audioFile} accept="audio/mp4,audio/x-m4a,.m4a" onChange={setAudioFile} /> : null}
       {includePdf ? <FileInput icon={Upload} label="PDF" file={pdf} accept="application/pdf" onChange={setPdf} /> : null}
+      {isBook ? <FileInput icon={Upload} label="EPUB" file={epub} accept="application/epub+zip,.epub" onChange={setEpub} /> : null}
       <button className="primary" disabled={busy}>{busy ? "Subiendo..." : "Guardar"}</button>
     </form>
   );

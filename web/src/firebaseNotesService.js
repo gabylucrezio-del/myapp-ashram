@@ -136,3 +136,75 @@ export async function publishNoteToCurso(note) {
     fecha_creacion: now,
   });
 }
+
+export function listenBookProjects(callback) {
+  return onValue(ref(db, "bookProjects"), (snap) => {
+    const value = snap.val() || {};
+    callback(
+      Object.entries(value)
+        .map(([id, book]) => ({ id, ...book }))
+        .sort((a, b) => (b.actualizadoEn || b.creadoEn || "").localeCompare(a.actualizadoEn || a.creadoEn || "")),
+    );
+  });
+}
+
+export function listenBookChapters(bookId, callback) {
+  if (!bookId) {
+    callback([]);
+    return () => {};
+  }
+  return onValue(ref(db, `bookChapters/${bookId}`), (snap) => {
+    const value = snap.val() || {};
+    callback(
+      Object.entries(value)
+        .map(([id, chapter]) => ({ id, bookId, ...chapter }))
+        .sort((a, b) => (a.orden || 0) - (b.orden || 0)),
+    );
+  });
+}
+
+export async function saveBookProject(book) {
+  const now = new Date().toISOString();
+  const data = {
+    titulo: (book.titulo || "").trim(),
+    autor: (book.autor || "").trim(),
+    descripcion: (book.descripcion || "").trim(),
+    portadaUrl: (book.portadaUrl || "").trim(),
+    estado: book.estado || "borrador",
+    actualizadoEn: now,
+  };
+  if (book.id) {
+    await update(ref(db, `bookProjects/${book.id}`), data);
+    return book.id;
+  }
+  const bookRef = push(ref(db, "bookProjects"));
+  await set(bookRef, { ...data, creadoEn: now });
+  return bookRef.key;
+}
+
+export async function deleteBookProject(bookId) {
+  await remove(ref(db, `bookProjects/${bookId}`));
+  await remove(ref(db, `bookChapters/${bookId}`));
+}
+
+export async function saveBookChapter(bookId, chapter) {
+  const now = new Date().toISOString();
+  const data = {
+    titulo: (chapter.titulo || "").trim(),
+    contenidoMarkdown: chapter.contenidoMarkdown || "",
+    orden: Number(chapter.orden || 0),
+    estado: chapter.estado || "borrador",
+    actualizadoEn: now,
+  };
+  if (chapter.id) {
+    await update(ref(db, `bookChapters/${bookId}/${chapter.id}`), data);
+    return chapter.id;
+  }
+  const chapterRef = push(ref(db, `bookChapters/${bookId}`));
+  await set(chapterRef, { ...data, creadoEn: now });
+  return chapterRef.key;
+}
+
+export async function deleteBookChapter(bookId, chapterId) {
+  await remove(ref(db, `bookChapters/${bookId}/${chapterId}`));
+}

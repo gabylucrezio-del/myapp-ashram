@@ -1,6 +1,5 @@
-import { Bold, CheckSquare, Code2, Eye, Heading2, Image as ImageIcon, Italic, Link, List, ListOrdered, Music, Quote, Save, StickyNote, Video, Volume2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { renderMarkdown } from "./NotePreview";
+import { Bold, CheckSquare, Code2, Heading1, Heading2, Heading3, Image as ImageIcon, Italic, Link, List, ListOrdered, Music, Quote, Redo2, Save, StickyNote, Undo2, Video, Volume2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 const emptyNote = {
   titulo: "",
@@ -21,15 +20,19 @@ const slashCommands = [
   { id: "imagen", label: "Link de imagen", icon: ImageIcon },
 ];
 
-export default function NoteEditor({ note, folders, notes = [], defaultFolderId = "", onSave }) {
+export default function NoteEditor({ note, folders, notes = [], defaultFolderId = "", onSave, mode = "note", hideResourceFields = false }) {
   const [form, setForm] = useState({ ...emptyNote, folderId: defaultFolderId, ...note });
   const [saving, setSaving] = useState(false);
   const [showSlash, setShowSlash] = useState(false);
-  const textareaRef = useRef(null);
-  const preview = useMemo(() => renderMarkdown(form.contenidoMarkdown), [form.contenidoMarkdown]);
+  const editorRef = useRef(null);
+  const savedRangeRef = useRef(null);
 
   useEffect(() => {
-    setForm({ ...emptyNote, folderId: defaultFolderId, ...note });
+    const nextForm = { ...emptyNote, folderId: defaultFolderId, ...note };
+    setForm(nextForm);
+    if (editorRef.current) {
+      editorRef.current.innerHTML = markdownToHtml(nextForm.contenidoMarkdown);
+    }
     setShowSlash(false);
   }, [note?.id, defaultFolderId]);
 
@@ -37,151 +40,393 @@ export default function NoteEditor({ note, folders, notes = [], defaultFolderId 
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function onMarkdownChange(event) {
-    const value = event.target.value;
-    setField("contenidoMarkdown", value);
-    const cursor = event.target.selectionStart;
-    setShowSlash(value[cursor - 1] === "/");
+  function syncEditor(extraFields = {}) {
+    const markdown = htmlToMarkdown(editorRef.current);
+    setForm((current) => ({ ...current, ...extraFields, contenidoMarkdown: markdown }));
+    setShowSlash(getTextBeforeCursor(editorRef.current).endsWith("/"));
   }
 
-  function replaceSlash(insertText, extraFields = {}) {
-    const textarea = textareaRef.current;
-    const cursor = textarea?.selectionStart ?? form.contenidoMarkdown.length;
-    const before = form.contenidoMarkdown.slice(0, cursor).replace(/\/$/, "");
-    const after = form.contenidoMarkdown.slice(cursor);
-    const next = `${before}${insertText}${after}`;
-    setForm((current) => ({ ...current, ...extraFields, contenidoMarkdown: next }));
+  function saveSelection() {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !editorRef.current?.contains(selection.anchorNode)) return;
+    savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+  }
+
+  function restoreSelection() {
+    if (!savedRangeRef.current) return;
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(savedRangeRef.current);
+  }
+
+  function focusEditor() {
+    editorRef.current?.focus();
+  }
+
+  function applyCommand(command, value = null, extraFields = {}) {
+    focusEditor();
+    restoreSelection();
+    document.execCommand(command, false, value);
+    saveSelection();
+    syncEditor(extraFields);
+  }
+
+  function insertHtml(html, extraFields = {}) {
+    focusEditor();
+    restoreSelection();
+    removeSlashBeforeCursor(editorRef.current);
+    document.execCommand("insertHTML", false, html);
+    saveSelection();
+    syncEditor(extraFields);
     setShowSlash(false);
-    window.setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
   function runSlashCommand(command) {
     if (command === "nota") {
       if (!notes.length) {
-        replaceSlash("[Nota vinculada](nota:)", {});
+        insertHtml('<a href="nota:">Nota vinculada</a>');
         return;
       }
       const options = notes.map((item, index) => `${index + 1}. ${item.titulo || "Sin titulo"}`).join("\n");
+      restoreSelection();
+      const selectedText = window.getSelection()?.toString();
       const selected = Number(window.prompt(`Elegi una nota por numero:\n${options}`));
       const target = notes[selected - 1];
       if (!target) return;
-      replaceSlash(`[${target.titulo || "Nota"}](nota:${target.id})`);
+      linkSelectionToNote(target, selectedText);
       return;
     }
 
     const url = window.prompt("Pega el link");
     if (!url) return;
-    if (command === "youtube") replaceSlash(`\n\n[Video](${url})\n`, { videoUrl: url });
-    if (command === "pdf") replaceSlash(`\n\n[PDF](${url})\n`, { pdfUrl: url });
-    if (command === "audio") replaceSlash(`\n\n[Audio](${url})\n`, { audioUrl: url });
-    if (command === "imagen") replaceSlash(`\n\n![Imagen](${url})\n`, { imagenUrl: url });
+    if (command === "youtube") insertHtml(`<p><a href="${escapeAttribute(url)}">Video</a></p>`, { videoUrl: url });
+    if (command === "pdf") insertHtml(`<p><a href="${escapeAttribute(url)}">PDF</a></p>`, { pdfUrl: url });
+    if (command === "audio") insertHtml(`<p><a href="${escapeAttribute(url)}">Audio</a></p>`, { audioUrl: url });
+    if (command === "imagen") insertHtml(`<figure><img src="${escapeAttribute(url)}" alt="Imagen" /></figure>`, { imagenUrl: url });
   }
 
-  function insertMarkdown(text, fieldUpdates = {}) {
-    const textarea = textareaRef.current;
-    const cursor = textarea?.selectionStart ?? form.contenidoMarkdown.length;
-    const before = form.contenidoMarkdown.slice(0, cursor);
-    const after = form.contenidoMarkdown.slice(cursor);
-    setForm((current) => ({ ...current, ...fieldUpdates, contenidoMarkdown: `${before}${text}${after}` }));
-    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  function insertLink() {
+    restoreSelection();
+    const url = window.prompt("Pega el link", "https://");
+    if (!url) return;
+    applyCommand("createLink", url);
   }
 
-  function wrapMarkdown(beforeToken, afterToken = beforeToken) {
-    const textarea = textareaRef.current;
-    const start = textarea?.selectionStart ?? form.contenidoMarkdown.length;
-    const end = textarea?.selectionEnd ?? start;
-    const selected = form.contenidoMarkdown.slice(start, end) || "texto";
-    const before = form.contenidoMarkdown.slice(0, start);
-    const after = form.contenidoMarkdown.slice(end);
-    setForm((current) => ({ ...current, contenidoMarkdown: `${before}${beforeToken}${selected}${afterToken}${after}` }));
-    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  function applyHeading(level) {
+    restoreSelection();
+    const selected = window.getSelection()?.toString();
+    if (selected?.trim()) {
+      insertHtml(`<h${level} class="compact-heading">${escapeHtml(selected.trim())}</h${level}>`);
+      return;
+    }
+    applyCommand("formatBlock", `H${level}`);
+  }
+
+  function insertCode() {
+    restoreSelection();
+    const selected = window.getSelection()?.toString() || "codigo";
+    insertHtml(`<code>${escapeHtml(selected)}</code>`);
+  }
+
+  function insertQuote() {
+    restoreSelection();
+    const selected = window.getSelection()?.toString();
+    if (selected.trim()) {
+      applyCommand("formatBlock", "BLOCKQUOTE");
+      return;
+    }
+    insertHtml("<blockquote>cita</blockquote>");
+  }
+
+  function handleEditorKeyDown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      applyCommand("undo");
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      applyCommand("redo");
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    restoreSelection();
+    document.execCommand("insertLineBreak", false);
+    saveSelection();
+    syncEditor();
+  }
+
+  function linkSelectionToNote(target, selectedText = "") {
+    const href = `nota:${target.id}`;
+    restoreSelection();
+    if (selectedText.trim()) {
+      applyCommand("createLink", href);
+      return;
+    }
+    insertHtml(`<a href="${escapeAttribute(href)}">${escapeHtml(target.titulo || "Nota")}</a>`);
   }
 
   const toolbar = [
-    { label: "Negrita", icon: Bold, action: () => wrapMarkdown("**") },
-    { label: "Cursiva", icon: Italic, action: () => wrapMarkdown("*") },
-    { label: "Titulo", icon: Heading2, action: () => insertMarkdown("\n## Titulo\n") },
-    { label: "Lista", icon: List, action: () => insertMarkdown("\n- item\n") },
-    { label: "Numerada", icon: ListOrdered, action: () => insertMarkdown("\n1. item\n") },
-    { label: "Tarea", icon: CheckSquare, action: () => insertMarkdown("\n- [ ] tarea\n") },
-    { label: "Link", icon: Link, action: () => insertMarkdown("[texto](https://)") },
+    { label: "Deshacer", icon: Undo2, action: () => applyCommand("undo") },
+    { label: "Rehacer", icon: Redo2, action: () => applyCommand("redo") },
+    { label: "Negrita", icon: Bold, action: () => applyCommand("bold") },
+    { label: "Cursiva", icon: Italic, action: () => applyCommand("italic") },
+    { label: "Titulo 1", icon: Heading1, action: () => applyHeading(1) },
+    { label: "Titulo 2", icon: Heading2, action: () => applyHeading(2) },
+    { label: "Titulo 3", icon: Heading3, action: () => applyHeading(3) },
+    { label: "Lista", icon: List, action: () => applyCommand("insertUnorderedList") },
+    { label: "Numerada", icon: ListOrdered, action: () => applyCommand("insertOrderedList") },
+    { label: "Tarea", icon: CheckSquare, action: () => insertHtml("<ul><li>[ ] tarea</li></ul>") },
+    { label: "Link", icon: Link, action: insertLink },
+    { label: "Nota", icon: StickyNote, action: () => runSlashCommand("nota") },
     { label: "Imagen", icon: ImageIcon, action: () => runSlashCommand("imagen") },
     { label: "Audio", icon: Volume2, action: () => runSlashCommand("audio") },
     { label: "Video", icon: Video, action: () => runSlashCommand("youtube") },
-    { label: "Codigo", icon: Code2, action: () => wrapMarkdown("`") },
-    { label: "Cita", icon: Quote, action: () => insertMarkdown("\n> cita\n") },
+    { label: "Codigo", icon: Code2, action: insertCode },
+    { label: "Cita", icon: Quote, action: insertQuote },
   ];
 
   async function submit(event) {
     event.preventDefault();
+    const latestMarkdown = htmlToMarkdown(editorRef.current);
     if (!form.titulo.trim()) return;
     setSaving(true);
     try {
-      await onSave(form);
+      await onSave({ ...form, contenidoMarkdown: latestMarkdown });
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <form className="note-editor note-editor-inline" onSubmit={submit}>
-        <div className="notebook-editor-head">
-          <input className="note-title-input" value={form.titulo} onChange={(event) => setField("titulo", event.target.value)} placeholder="Titulo de la nota" />
-          <button className="primary small" disabled={saving}><Save size={16} /> {saving ? "Guardando..." : "Guardar"}</button>
-        </div>
+    <form className={`note-editor note-editor-inline ${mode === "chapter" ? "chapter-note-editor" : ""}`} onSubmit={submit}>
+      <div className="notebook-editor-head">
+        <input className="note-title-input" value={form.titulo} onChange={(event) => setField("titulo", event.target.value)} placeholder="Titulo de la nota" />
+        <button className="primary small" disabled={saving}><Save size={16} /> {saving ? "Guardando..." : "Guardar"}</button>
+      </div>
+      {folders.length || mode !== "chapter" ? (
         <div className="note-meta-row">
-        <label>Carpeta
-          <select value={form.folderId || ""} onChange={(event) => setField("folderId", event.target.value)}>
-            <option value="">Sin carpeta</option>
-            {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.nombre}</option>)}
-          </select>
-        </label>
-        <label>Estado
-          <select value={form.estado} onChange={(event) => setField("estado", event.target.value)}>
-            <option value="borrador">Borrador</option>
-            <option value="listo">Listo</option>
-            <option value="publicado">Publicado</option>
-          </select>
-        </label>
-        </div>
-        <div className="note-editor-tabs">
-          <span>Editar</span>
-          <span><Eye size={14} /> Vista previa</span>
-        </div>
-        <div className="note-format-toolbar" aria-label="Herramientas Markdown">
-          {toolbar.map(({ label, icon: Icon, action }) => (
-            <button key={label} type="button" onClick={action} title={label}>
-              <Icon size={15} />
-            </button>
-          ))}
-        </div>
-        <div className="note-editor-grid">
-          <label className="markdown-field">Markdown
-            <span className="editor-shell">
-              <textarea ref={textareaRef} className="markdown-editor" value={form.contenidoMarkdown} onChange={onMarkdownChange} placeholder="Escribi tu nota. Usa / para insertar una nota, video, PDF, audio o imagen." />
-              {showSlash ? (
-                <div className="slash-menu">
-                  {slashCommands.map(({ id, label, icon: Icon }) => (
-                    <button key={id} type="button" onClick={() => runSlashCommand(id)}>
-                      <Icon size={16} />
-                      <span>{label}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </span>
+          <label>Carpeta
+            <select value={form.folderId || ""} onChange={(event) => setField("folderId", event.target.value)}>
+              <option value="">Sin carpeta</option>
+              {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.nombre}</option>)}
+            </select>
           </label>
-          <section className="editor-preview">
-            <strong>Vista previa</strong>
-            <article className="markdown-body">{preview}</article>
-          </section>
+          <label>Estado
+            <select value={form.estado} onChange={(event) => setField("estado", event.target.value)}>
+              <option value="borrador">Borrador</option>
+              <option value="listo">Listo</option>
+              <option value="publicado">Publicado</option>
+            </select>
+          </label>
         </div>
+      ) : (
+        <input type="hidden" value={form.estado} readOnly />
+      )}
+      {folders.length || mode !== "chapter" ? null : (
+        <div className="chapter-status-row">
+          <span>{form.estado || "borrador"}</span>
+        </div>
+      )}
+      <div className="note-editor-tabs">
+        <span>Editor visual</span>
+      </div>
+      <div className="note-format-toolbar" aria-label="Herramientas de formato">
+        {toolbar.map(({ label, icon: Icon, action }) => (
+          <button
+            key={label}
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              restoreSelection();
+              action();
+            }}
+            title={label}
+          >
+            <Icon size={15} />
+          </button>
+        ))}
+      </div>
+      <div className="note-editor-grid">
+        <label className="markdown-field">
+          <span className="editor-shell">
+            <div
+              ref={editorRef}
+              className="markdown-editor visual-note-editor markdown-body"
+              contentEditable
+              suppressContentEditableWarning
+              data-placeholder="Escribi tu nota. Usa / para insertar una nota, video, PDF, audio o imagen."
+              onInput={() => {
+                saveSelection();
+                syncEditor();
+              }}
+              onKeyUp={() => {
+                saveSelection();
+                syncEditor();
+              }}
+              onKeyDown={handleEditorKeyDown}
+              onMouseUp={saveSelection}
+              onPaste={() => window.setTimeout(() => syncEditor(), 0)}
+            />
+            {showSlash ? (
+              <div className="slash-menu">
+                {slashCommands.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      restoreSelection();
+                      runSlashCommand(id);
+                    }}
+                  >
+                    <Icon size={16} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </span>
+        </label>
+      </div>
+      {!hideResourceFields ? (
         <div className="note-url-grid">
           <label><ImageIcon size={14} /> Imagen<input value={form.imagenUrl} onChange={(event) => setField("imagenUrl", event.target.value)} placeholder="Pega el link aqui..." /></label>
           <label><Music size={14} /> Audio<input value={form.audioUrl} onChange={(event) => setField("audioUrl", event.target.value)} placeholder="Pega el link aqui..." /></label>
           <label><Link size={14} /> PDF<input value={form.pdfUrl} onChange={(event) => setField("pdfUrl", event.target.value)} placeholder="Pega el link aqui..." /></label>
           <label><Video size={14} /> Video<input value={form.videoUrl} onChange={(event) => setField("videoUrl", event.target.value)} placeholder="Pega el link aqui..." /></label>
         </div>
-      </form>
+      ) : null}
+    </form>
   );
+}
+
+function markdownToHtml(markdown = "") {
+  const lines = markdown.split(/\r?\n/);
+  const html = [];
+  let listItems = [];
+  let orderedItems = [];
+
+  function flushList() {
+    if (listItems.length) {
+      html.push(`<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
+      listItems = [];
+    }
+    if (orderedItems.length) {
+      html.push(`<ol>${orderedItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ol>`);
+      orderedItems = [];
+    }
+  }
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList();
+      return;
+    }
+    if (line.startsWith("- ")) {
+      orderedItems = [];
+      listItems.push(line.slice(2));
+      return;
+    }
+    const ordered = line.match(/^\d+\.\s+(.+)$/);
+    if (ordered) {
+      listItems = [];
+      orderedItems.push(ordered[1]);
+      return;
+    }
+    flushList();
+    if (line.startsWith("### ")) html.push(`<h3>${renderInlineMarkdown(line.slice(4))}</h3>`);
+    else if (line.startsWith("## ")) html.push(`<h2>${renderInlineMarkdown(line.slice(3))}</h2>`);
+    else if (line.startsWith("# ")) html.push(`<h1>${renderInlineMarkdown(line.slice(2))}</h1>`);
+    else if (line.startsWith("> ")) html.push(`<blockquote>${renderInlineMarkdown(line.slice(2))}</blockquote>`);
+    else html.push(`<p>${renderInlineMarkdown(line)}</p>`);
+  });
+  flushList();
+  return html.join("");
+}
+
+function renderInlineMarkdown(text = "") {
+  let html = escapeHtml(text);
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => `<img src="${escapeAttribute(src)}" alt="${escapeAttribute(alt)}" />`);
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => `<a href="${escapeAttribute(href)}">${label}</a>`);
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  return html;
+}
+
+function htmlToMarkdown(root) {
+  if (!root) return "";
+  return Array.from(root.childNodes)
+    .map((node) => blockToMarkdown(node))
+    .join("")
+    .replace(/\u00a0/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function blockToMarkdown(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const tag = node.tagName.toLowerCase();
+  if (tag === "br") return "\n";
+  if (tag === "h1") return `# ${inlineToMarkdown(node)}\n`;
+  if (tag === "h2") return `## ${inlineToMarkdown(node)}\n`;
+  if (tag === "h3") return `### ${inlineToMarkdown(node)}\n`;
+  if (tag === "blockquote") return `> ${inlineToMarkdown(node)}\n`;
+  if (tag === "ul") return `${Array.from(node.children).map((child) => `- ${inlineToMarkdown(child)}`).join("\n")}\n`;
+  if (tag === "ol") return `${Array.from(node.children).map((child, index) => `${index + 1}. ${inlineToMarkdown(child)}`).join("\n")}\n`;
+  if (tag === "figure") return `${inlineToMarkdown(node)}\n`;
+  if (tag === "p" || tag === "div") return `${inlineToMarkdown(node)}\n`;
+  return inlineToMarkdown(node);
+}
+
+function inlineToMarkdown(node) {
+  return Array.from(node.childNodes).map((child) => {
+    if (child.nodeType === Node.TEXT_NODE) return child.textContent || "";
+    if (child.nodeType !== Node.ELEMENT_NODE) return "";
+    const tag = child.tagName.toLowerCase();
+    const text = inlineToMarkdown(child);
+    if (tag === "strong" || tag === "b") return `**${text}**`;
+    if (tag === "em" || tag === "i") return `*${text}*`;
+    if (tag === "code") return `\`${text}\``;
+    if (tag === "a") return `[${text || child.href}](${child.getAttribute("href") || child.href})`;
+    if (tag === "img") return `![${child.getAttribute("alt") || "Imagen"}](${child.getAttribute("src") || child.src})`;
+    if (tag === "br") return "\n";
+    if (tag === "li") return inlineToMarkdown(child);
+    return text;
+  }).join("").trim();
+}
+
+function getTextBeforeCursor(editor) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return "";
+  const range = selection.getRangeAt(0).cloneRange();
+  if (!editor || !editor.contains(range.startContainer)) return "";
+  range.selectNodeContents(editor);
+  range.setEnd(selection.anchorNode, selection.anchorOffset);
+  return range.toString();
+}
+
+function removeSlashBeforeCursor(editor) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !getTextBeforeCursor(editor).endsWith("/")) return;
+  const range = selection.getRangeAt(0);
+  if (range.startOffset > 0 && range.startContainer.nodeType === Node.TEXT_NODE) {
+    range.setStart(range.startContainer, range.startOffset - 1);
+    range.deleteContents();
+  }
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeAttribute(value = "") {
+  return escapeHtml(value).replace(/"/g, "&quot;");
 }

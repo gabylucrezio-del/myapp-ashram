@@ -150,6 +150,18 @@ export async function uploadPdf(file, folder) {
   return { url: await getDownloadURL(ref), path };
 }
 
+export async function uploadEpub(file, folder) {
+  const name = file.name.toLowerCase();
+  const isEpub = file.type === "application/epub+zip" || name.endsWith(".epub");
+  if (!isEpub) {
+    throw new Error("El archivo debe ser EPUB.");
+  }
+  const path = `${folder}/${new Date().toISOString().slice(0, 10)}_${crypto.randomUUID()}.epub`;
+  const ref = storageRef(storage, path);
+  await uploadBytes(ref, file, { contentType: "application/epub+zip" });
+  return { url: await getDownloadURL(ref), path };
+}
+
 export async function uploadAudio(file, folder) {
   const name = file.name.toLowerCase();
   const isM4a = file.type === "audio/mp4" || file.type === "audio/x-m4a" || name.endsWith(".m4a");
