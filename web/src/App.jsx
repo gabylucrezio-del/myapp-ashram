@@ -11,6 +11,8 @@ import {
   Play,
   Send,
   Share2,
+  ShoppingBag,
+  ShoppingCart,
   Download,
   Dumbbell,
   GraduationCap,
@@ -18,6 +20,7 @@ import {
   ImageIcon,
   Library,
   LogOut,
+  Minus,
   Pencil,
   Plus,
   Shield,
@@ -70,6 +73,7 @@ const sections = [
   { id: "ejercicios", label: "Ejercicios", icon: Dumbbell, iconSrc: "/icono_ejercicios.webp" },
   { id: "meditaciones", label: "Meditacion", icon: Headphones, iconSrc: "/icono_meditacion.webp" },
   { id: "satsang", label: "Satsang", icon: Heart, iconSrc: "/satsang.webp" },
+  { id: "tienda", label: "Tienda", icon: ShoppingBag },
 ];
 
 const adminSections = [
@@ -81,6 +85,7 @@ const adminSections = [
   { id: "blog", label: "Blog", icon: Newspaper, iconSrc: "/icono_blog.webp" },
   { id: "banners", label: "Banners", icon: ImageIcon },
   { id: "usuarios", label: "Usuarios", icon: User },
+  { id: "tienda", label: "Tienda", icon: ShoppingBag },
   { id: "libros", label: "Libros", icon: BookOpen },
   { id: "cuaderno", label: "Cuaderno", icon: Library },
 ];
@@ -229,6 +234,7 @@ export default function App() {
         {view === "ejercicios" && <Contenido coleccion="ejercicios" titulo="Ejercicios" profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
         {view === "meditaciones" && <Meditaciones user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onShare={openShare} />}
         {view === "satsang" && <Contenido coleccion="satsang" titulo="Satsang" user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
+        {view === "tienda" && <Tienda user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "chat" && <Chat user={authState.user} profile={authState.profile} onBack={() => navigate("home")} />}
         {view === "admin" && (
           <Admin
@@ -526,6 +532,165 @@ function Home({ profile, setView }) {
   );
 }
 
+function Tienda({ user, profile, onBack, onToast }) {
+  const [products, setProducts] = useState([]);
+  const [cart, setCart] = useState(() => readCart());
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const visibleProducts = products
+    .filter((product) => product.activo !== false)
+    .sort((a, b) => productName(a).localeCompare(productName(b)));
+
+  useEffect(() => {
+    loadList("productos").then(setProducts);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("ashram-store-cart", JSON.stringify(cart));
+  }, [cart]);
+
+  const cartItems = Object.entries(cart)
+    .map(([id, quantity]) => {
+      const product = products.find((item) => item.id === id);
+      return product ? { product, quantity } : null;
+    })
+    .filter(Boolean);
+  const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
+  const cartTotal = cartItems.reduce((total, item) => total + productPrice(item.product) * item.quantity, 0);
+
+  function addProduct(product) {
+    const stock = productStock(product);
+    const current = cart[product.id] || 0;
+    if (stock > 0 && current >= stock) {
+      onToast?.("No hay mas stock disponible.");
+      return;
+    }
+    setCart((old) => ({ ...old, [product.id]: current + 1 }));
+    onToast?.("Producto agregado al carrito.");
+  }
+
+  function changeQuantity(product, delta) {
+    const stock = productStock(product);
+    setCart((old) => {
+      const nextQuantity = (old[product.id] || 0) + delta;
+      if (nextQuantity <= 0) {
+        const next = { ...old };
+        delete next[product.id];
+        return next;
+      }
+      if (stock > 0 && nextQuantity > stock) {
+        onToast?.("No hay mas stock disponible.");
+        return old;
+      }
+      return { ...old, [product.id]: nextQuantity };
+    });
+  }
+
+  async function finishOrder() {
+    if (!cartItems.length) {
+      onToast?.("Tu carrito esta vacio.");
+      return;
+    }
+
+    const order = {
+      uid: user?.uid || "",
+      email: profile?.email || user?.email || "",
+      nombre: profile?.nombre || "",
+      domicilio: profile?.domicilio || "",
+      telefono: profile?.telefono || "",
+      codigo_postal: profile?.codigo_postal || "",
+      estado: "pendiente",
+      fecha: new Date().toISOString(),
+      total: cartTotal,
+      items: cartItems.map(({ product, quantity }) => ({
+        producto_id: product.id,
+        nombre: productName(product),
+        cantidad: quantity,
+        precio: productPrice(product),
+        subtotal: productPrice(product) * quantity,
+      })),
+    };
+
+    const orderRef = await push(ref(db, "pedidos"), order);
+    setCart({});
+    onToast?.("Pedido guardado. Te abrimos WhatsApp con el resumen.");
+    window.location.href = storeWhatsappUrl({ ...order, id: orderRef.key });
+  }
+
+  return (
+    <section className="content-page store-page">
+      <PageTitle icon={ShoppingBag} title="Tienda" subtitle="Productos del Ashram para acompanar tu practica." onBack={onBack} />
+      <div className="store-summary">
+        <span>
+          <strong>Carrito</strong>
+          <small>{cartCount} productos - {formatMoney(cartTotal)}</small>
+        </span>
+        <button className="primary small" type="button" onClick={finishOrder} disabled={!cartItems.length}>
+          <ShoppingCart size={16} /> Finalizar
+        </button>
+      </div>
+      <div className="store-grid">
+        {visibleProducts.map((product) => {
+          const quantity = cart[product.id] || 0;
+          const stock = productStock(product);
+          const soldOut = stock === 0;
+          return (
+            <button className="store-card" type="button" key={product.id} onClick={() => setSelectedProduct(product)}>
+              <img src={product.imagen || "/icono_conocimiento.webp"} alt="" />
+              <div>
+                <h3>{productName(product)}</h3>
+                <strong>{formatMoney(productPrice(product))}</strong>
+                <small>{soldOut ? "Sin stock" : stock > 0 ? `Stock: ${stock}` : "Disponible"}</small>
+                {quantity ? <em>{quantity} en carrito</em> : null}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {!visibleProducts.length ? <p className="empty-state">Todavia no hay productos cargados.</p> : null}
+      {selectedProduct ? (
+        <ProductDetailModal
+          product={selectedProduct}
+          quantity={cart[selectedProduct.id] || 0}
+          onClose={() => setSelectedProduct(null)}
+          onAdd={() => addProduct(selectedProduct)}
+          onChangeQuantity={(delta) => changeQuantity(selectedProduct, delta)}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function ProductDetailModal({ product, quantity, onClose, onAdd, onChangeQuantity }) {
+  const stock = productStock(product);
+  const soldOut = stock === 0;
+  return (
+    <div className="modal-backdrop">
+      <section className="store-modal">
+        <button className="icon-btn store-modal-close" type="button" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
+        <img src={product.imagen || "/icono_conocimiento.webp"} alt="" />
+        <div className="store-modal-body">
+          <small>{product.categoria || "Ashram Ganesha"}</small>
+          <h2>{productName(product)}</h2>
+          <strong>{formatMoney(productPrice(product))}</strong>
+          <p>{product.descripcion || "Producto de Ashram Ganesha."}</p>
+          <small>{soldOut ? "Sin stock" : stock > 0 ? `Stock: ${stock}` : "Disponible"}</small>
+          {quantity ? (
+            <div className="quantity-control">
+              <button type="button" onClick={() => onChangeQuantity(-1)}><Minus size={16} /></button>
+              <span>{quantity} en carrito</span>
+              <button type="button" onClick={() => onChangeQuantity(1)}><Plus size={16} /></button>
+            </div>
+          ) : (
+            <button className="primary" type="button" disabled={soldOut} onClick={onAdd}>
+              <ShoppingCart size={18} /> Agregar al carrito
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Biblioteca({ profile, onBack, onToast, onShare }) {
   const [books, setBooks] = useState([]);
   const [query, setQuery] = useState("");
@@ -633,6 +798,7 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
   const [items, setItems] = useState([]);
   const [social, setSocial] = useState({});
   const [selected, setSelected] = useState(null);
+  const [selectedCourse, setSelectedCourse] = useState(null);
 
   useEffect(() => {
     loadList(coleccion).then((nextItems) => {
@@ -642,16 +808,25 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
   }, [coleccion]);
 
   useEffect(() => {
-    const closeDetail = () => setSelected(null);
+    const closeDetail = () => {
+      setSelected(null);
+      setSelectedCourse(null);
+    };
     window.addEventListener("popstate", closeDetail);
     return () => window.removeEventListener("popstate", closeDetail);
   }, []);
 
+  const isCourseCollection = ["conocimiento", "ejercicios"].includes(coleccion);
   const freeId = items[0]?.id;
 
   function openDetail(item) {
     window.history.pushState({ detail: item.id }, "", `#${coleccion}/${item.id}`);
     setSelected(item);
+  }
+
+  function openCourse(tag) {
+    window.history.pushState({ course: tag }, "", `#${coleccion}/${encodeURIComponent(tag)}`);
+    setSelectedCourse(tag);
   }
 
   if (selected) {
@@ -665,11 +840,30 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
         titulo={titulo}
         coleccion={coleccion}
         profile={profile}
-        showSubscribe={selected.id === freeId && needsSubscription(profile, coleccion)}
+        showSubscribe={false}
         onBack={() => window.history.back()}
         onToast={onToast}
         onSubscribe={onSubscribe}
         onShare={() => onShare?.(coleccion, selected)}
+      />
+    );
+  }
+
+  const groups = coleccion === "satsang" ? { Satsang: items } : groupBy(items, "etiqueta");
+
+  if (isCourseCollection && selectedCourse) {
+    const modules = sortCourseModules(groups[selectedCourse] || []);
+    return (
+      <CourseDetail
+        coleccion={coleccion}
+        titulo={titulo}
+        tag={selectedCourse}
+        modules={modules}
+        profile={profile}
+        onBack={() => window.history.back()}
+        onOpenModule={openDetail}
+        onSubscribe={() => onSubscribe?.(coleccion)}
+        onShare={(item) => onShare?.(coleccion, item)}
       />
     );
   }
@@ -703,7 +897,33 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
     );
   }
 
-  const groups = coleccion === "satsang" ? { Satsang: items } : groupBy(items, "etiqueta");
+  if (isCourseCollection) {
+    return (
+      <section className="content-page">
+        <PageTitle icon={sectionIcon(coleccion)} iconSrc={sectionIconSrc(coleccion)} title={titulo} subtitle={sectionSubtitle(coleccion)} onBack={onBack} />
+        <div className="course-grid">
+          {Object.entries(groups).map(([tag, modules]) => {
+            const sortedModules = sortCourseModules(modules);
+            const first = sortedModules[0] || {};
+            const courseOpen = isCourseOpen(sortedModules);
+            const paidCount = Math.max(0, sortedModules.length - 1);
+            return (
+              <button className="course-card" type="button" key={tag} onClick={() => openCourse(tag)}>
+                <img src={first.imagen || sectionFallbackImage(coleccion)} alt="" />
+                <span>
+                  <small>{courseOpen ? "Acceso libre" : "Primer video gratis"}</small>
+                  <strong>{tag}</strong>
+                  <p>{summary(first.descripcion || `${sortedModules.length} clases para practicar paso a paso.`, 120)}</p>
+                  <em>{sortedModules.length} clases - {courseOpen ? "todo abierto" : `${paidCount} por suscripcion`}</em>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="content-page">
       <PageTitle icon={sectionIcon(coleccion)} iconSrc={sectionIconSrc(coleccion)} title={titulo} subtitle={sectionSubtitle(coleccion)} onBack={onBack} />
@@ -785,6 +1005,53 @@ function DetalleModulo({ modulo, titulo, coleccion, profile, showSubscribe, onBa
             <Download size={18} /> Descargar PDF
           </a>
         ) : null}
+      </article>
+    </section>
+  );
+}
+
+function CourseDetail({ coleccion, titulo, tag, modules, profile, onBack, onOpenModule, onSubscribe, onShare }) {
+  const freeModule = modules[0];
+  const courseOpen = isCourseOpen(modules);
+  return (
+    <section className="content-page">
+      <PageTitle icon={sectionIcon(coleccion)} iconSrc={sectionIconSrc(coleccion)} title={titulo} subtitle={tag} onBack={onBack} />
+      <article className="course-detail">
+        <img className="course-cover" src={freeModule?.imagen || sectionFallbackImage(coleccion)} alt="" />
+        <h1>{tag}</h1>
+        <p>{freeModule?.descripcion}</p>
+        <div className="course-list-head">
+          <strong>Contenido del curso</strong>
+          <small>{courseOpen ? "Este curso esta configurado como acceso libre." : "La primera clase esta abierta como muestra. Las siguientes se habilitan con suscripcion."}</small>
+        </div>
+        <div className="course-class-list">
+          {modules.map((item, index) => {
+            const free = index === 0;
+            const locked = !free && !courseOpen && !hasContentAccess(profile, coleccion, item, freeModule?.id);
+            return (
+              <button
+                className={`course-class ${locked ? "locked" : ""}`}
+                type="button"
+                key={item.id}
+                onClick={() => {
+                  if (locked) {
+                    onSubscribe?.();
+                    return;
+                  }
+                  onOpenModule(item);
+                }}
+              >
+                <span>{index + 1}</span>
+                <strong>{contentTitle(item)}</strong>
+                <small>{free ? "Muestra gratis" : locked ? "Suscripcion" : "Disponible"}</small>
+                {locked ? <Lock size={17} /> : <Video size={18} />}
+              </button>
+            );
+          })}
+        </div>
+        <button className="ghost compact share-content-button" type="button" onClick={() => onShare?.(freeModule)}>
+          <Share2 size={15} /> Compartir
+        </button>
       </article>
     </section>
   );
@@ -1411,7 +1678,19 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
           <Plus size={18} /> Nuevo
         </button>
       ) : null}
-      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && (
+      {editing && section === "tienda" ? (
+        <ProductAdminForm
+          item={editing}
+          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            refresh();
+            onToast("Producto guardado.");
+          }}
+          onToast={onToast}
+        />
+      ) : null}
+      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "tienda" && (
         <AdminForm
           key={`${section}-${editing.id || "new"}`}
           section={section}
@@ -1448,8 +1727,8 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
             <article className="admin-row" key={item.id}>
               <img src={item.portada_url || item.imagen || sectionFallbackImage(section)} alt="" />
               <span>
-                <strong>{contentTitle(item)}</strong>
-                <small>{section === "satsang" ? "Satsang" : item.categoria || item.etiqueta || "Sin categoria"}</small>
+                <strong>{section === "tienda" ? productName(item) : contentTitle(item)}</strong>
+                <small>{section === "tienda" ? `${formatMoney(productPrice(item))} - Stock: ${item.stock ?? 0}` : section === "satsang" ? "Satsang" : item.categoria || item.etiqueta || "Sin categoria"}</small>
               </span>
               <button className="icon-btn" onClick={() => setEditing(item)}><Pencil size={18} /></button>
               <button className="icon-btn danger" onClick={() => deleteItem(item)}><Trash2 size={18} /></button>
@@ -1776,6 +2055,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
   const isBanner = section === "banners";
   const isMeditation = section === "meditaciones";
   const isSatsang = section === "satsang";
+  const isCourseSection = ["conocimiento", "ejercicios"].includes(section);
   const hasAccessMode = isBook || isMeditation;
   const includePdf = isBook || section === "conocimiento";
   const [form, setForm] = useState({
@@ -1789,6 +2069,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
     detalle: item.detalle || "",
     link_drive: item.link_drive || "",
     acceso: item.acceso || item.tipo_acceso || "gratis",
+    curso_acceso: item.curso_acceso || item.acceso_curso || "suscripcion",
   });
   const [blogPosts, setBlogPosts] = useState([]);
   const [image, setImage] = useState(null);
@@ -1850,6 +2131,10 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
         data.etiqueta = cleanText(form.categoria);
         data.video = cleanText(form.video);
         data.link_video_original = cleanText(form.video);
+        if (isCourseSection) {
+          data.orden = Number(form.orden) || 0;
+          data.curso_acceso = form.curso_acceso;
+        }
       }
 
       if (isMeditation) {
@@ -1952,7 +2237,16 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
         </label>
       ) : null}
       {isMeditation ? <label>Detalle / sugerencia<textarea value={form.detalle} onChange={(e) => setField("detalle", e.target.value)} /></label> : null}
-      {!isBanner && !isMeditation && !isSatsang ? <label>{isBook ? "Categoria" : "Etiqueta"}<input value={form.categoria} onChange={(e) => setField("categoria", e.target.value)} /></label> : null}
+      {!isBanner && !isMeditation && !isSatsang ? <label>{isBook ? "Categoria" : isCourseSection ? "Serie" : "Etiqueta"}<input value={form.categoria} onChange={(e) => setField("categoria", e.target.value)} /></label> : null}
+      {isCourseSection ? (
+        <label>Acceso del curso
+          <select value={form.curso_acceso} onChange={(e) => setField("curso_acceso", e.target.value)}>
+            <option value="suscripcion">Primera clase gratis y resto por suscripcion</option>
+            <option value="gratis">Acceso libre a todo el curso</option>
+          </select>
+        </label>
+      ) : null}
+      {isCourseSection ? <label>Orden de clase<input value={form.orden} onChange={(e) => setField("orden", e.target.value)} type="number" min="1" /></label> : null}
       {isBanner ? <label>Orden<input value={form.orden} onChange={(e) => setField("orden", e.target.value)} type="number" /></label> : null}
       {isBanner ? (
         <label>Post del blog
@@ -1972,6 +2266,84 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
       {includePdf ? <FileInput icon={Upload} label="PDF" file={pdf} accept="application/pdf" onChange={setPdf} /> : null}
       {isBook ? <FileInput icon={Upload} label="EPUB" file={epub} accept="application/epub+zip,.epub" onChange={setEpub} /> : null}
       <button className="primary" disabled={busy}>{busy ? "Subiendo..." : "Guardar"}</button>
+    </form>
+  );
+}
+
+function ProductAdminForm({ item, onCancel, onSaved, onToast }) {
+  const [form, setForm] = useState({
+    nombre: item.nombre || "",
+    descripcion: item.descripcion || "",
+    precio: item.precio || "",
+    stock: item.stock ?? "",
+    categoria: item.categoria || "",
+    activo: item.activo !== false,
+  });
+  const [image, setImage] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  function setField(key, value) {
+    setForm((old) => ({ ...old, [key]: value }));
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    if (!cleanText(form.nombre)) return onToast("Completa el nombre.");
+    if (toNumber(form.precio) <= 0) return onToast("Completa un precio valido.");
+    if (!image && !item.imagen) return onToast("Selecciona una imagen.");
+
+    setBusy(true);
+    try {
+      const data = {
+        nombre: cleanText(form.nombre),
+        descripcion: cleanText(form.descripcion),
+        precio: toNumber(form.precio),
+        stock: Math.max(0, Math.trunc(toNumber(form.stock))),
+        categoria: cleanText(form.categoria),
+        activo: Boolean(form.activo),
+        fecha_creacion: item.fecha_creacion || new Date().toISOString(),
+      };
+
+      if (image) {
+        const uploaded = await uploadImageWithFallback(image, "productos/imagenes");
+        data.imagen = uploaded.url;
+        data.imagen_path = uploaded.path;
+      } else {
+        data.imagen = item.imagen || "";
+        data.imagen_path = item.imagen_path || "";
+      }
+
+      if (item.id) {
+        await update(ref(db, `productos/${item.id}`), data);
+      } else {
+        await push(ref(db, "productos"), data);
+      }
+      onSaved();
+    } catch (error) {
+      onToast(error.message || "No se pudo guardar el producto.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="admin-form" onSubmit={save}>
+      <div className="form-head">
+        <h2>{item.id ? "Editar producto" : "Nuevo producto"}</h2>
+        <button className="icon-btn" type="button" onClick={onCancel}><X size={18} /></button>
+      </div>
+      <label>Nombre<input value={form.nombre} onChange={(event) => setField("nombre", event.target.value)} /></label>
+      <label>Descripcion<textarea value={form.descripcion} onChange={(event) => setField("descripcion", event.target.value)} /></label>
+      <label>Precio<input inputMode="decimal" value={form.precio} onChange={(event) => setField("precio", event.target.value)} /></label>
+      <label>Stock<input type="number" min="0" value={form.stock} onChange={(event) => setField("stock", event.target.value)} /></label>
+      <label>Categoria<input value={form.categoria} onChange={(event) => setField("categoria", event.target.value)} /></label>
+      <label className="check-row">
+        <input type="checkbox" checked={form.activo} onChange={(event) => setField("activo", event.target.checked)} />
+        Producto activo
+      </label>
+      {item.imagen ? <img className="form-preview" src={item.imagen} alt="" /> : null}
+      <FileInput icon={ImageIcon} label="Imagen" file={image} accept="image/jpeg,image/png,image/webp" onChange={setImage} />
+      <button className="primary" disabled={busy}>{busy ? "Guardando..." : "Guardar producto"}</button>
     </form>
   );
 }
@@ -2152,6 +2524,7 @@ function sectionSubtitle(id) {
     ejercicios: "Practicas simples para habitar el cuerpo.",
     meditaciones: "Un momento para volver al centro.",
     satsang: "Encuentros, palabras y presencia compartida.",
+    tienda: "Productos del Ashram para acompanar tu practica.",
     chat: "Un canal directo para acompanarte.",
   };
   return subtitles[id] || "";
@@ -2161,7 +2534,59 @@ function sectionFallbackImage(id) {
   if (id === "biblioteca") return "/icono_biblioteca.webp";
   if (id === "blog") return "/icono_blog.webp";
   if (id === "meditaciones") return "/icono_meditacion.webp";
+  if (id === "tienda") return "/icono_conocimiento.webp";
   return sectionIconSrc(id) || "/icono_conocimiento.webp";
+}
+
+function productName(product) {
+  return cleanText(product?.nombre) || cleanText(product?.titulo) || "Producto";
+}
+
+function toNumber(value) {
+  const number = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function productPrice(product) {
+  return toNumber(product?.precio);
+}
+
+function productStock(product) {
+  if (product?.stock === "" || product?.stock === undefined || product?.stock === null) return -1;
+  return Math.trunc(toNumber(product.stock));
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: Number.isInteger(toNumber(value)) ? 0 : 2,
+  }).format(toNumber(value));
+}
+
+function readCart() {
+  try {
+    return JSON.parse(localStorage.getItem("ashram-store-cart") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function storeWhatsappUrl(order) {
+  const lines = [
+    "Hola, quiero confirmar este pedido de Ashram Ganesha:",
+    `Pedido: ${order.id || ""}`,
+    `Nombre: ${order.nombre || ""}`,
+    `Domicilio: ${order.domicilio || ""}`,
+    `Telefono: ${order.telefono || ""}`,
+    `Codigo postal: ${order.codigo_postal || ""}`,
+    "",
+    "Detalle del pedido:",
+    ...order.items.map((item) => `- ${item.cantidad} x ${item.nombre} = ${formatMoney(item.subtotal)}`),
+    "",
+    `Total: ${formatMoney(order.total)}`,
+  ];
+  return `https://wa.me/${ADMIN_WHATSAPP}?text=${encodeURIComponent(lines.join("\n"))}`;
 }
 
 function noteTargetToSection(target) {
@@ -2615,6 +3040,19 @@ function groupBy(items, key) {
     groups[group].push(item);
     return groups;
   }, {});
+}
+
+function sortCourseModules(modules) {
+  return [...modules].sort((a, b) => {
+    const orderA = Number(a.orden) || 0;
+    const orderB = Number(b.orden) || 0;
+    if (orderA || orderB) return orderA - orderB;
+    return contentTitle(a).localeCompare(contentTitle(b));
+  });
+}
+
+function isCourseOpen(modules) {
+  return modules.some((item) => (item.curso_acceso || item.acceso_curso) === "gratis");
 }
 
 function hashView() {
