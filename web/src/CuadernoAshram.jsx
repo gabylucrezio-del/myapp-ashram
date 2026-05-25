@@ -1,5 +1,5 @@
-import { BookOpen, Copy, Edit3, FileText, FolderOpen, FolderPlus, GraduationCap, Headphones, Plus, Search, Sparkles, Trash2, Users, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { BookOpen, Camera, Copy, Edit3, FileText, FolderOpen, FolderPlus, GraduationCap, Headphones, Maximize2, Palette, Pause, Play, Plus, Search, Sparkles, Trash2, Type, Users, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import FolderList from "./FolderList";
 import NoteEditor from "./NoteEditor";
 import {
@@ -15,9 +15,12 @@ import {
   saveNote,
 } from "./firebaseNotesService";
 
+const LOCAL_FOLDERS_CACHE_KEY = "ashramTeleprompterFolders";
+const LOCAL_NOTES_CACHE_KEY = "ashramTeleprompterNotes";
+
 export default function CuadernoAshram({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onShared }) {
-  const [folders, setFolders] = useState([]);
-  const [notes, setNotes] = useState([]);
+  const [folders, setFolders] = useState(() => readLocalCache(LOCAL_FOLDERS_CACHE_KEY));
+  const [notes, setNotes] = useState(() => readLocalCache(LOCAL_NOTES_CACHE_KEY));
   const [selectedFolderId, setSelectedFolderId] = useState("");
   const [selectedNoteId, setSelectedNoteId] = useState("");
   const [editingNote, setEditingNote] = useState(null);
@@ -25,12 +28,21 @@ export default function CuadernoAshram({ profile, quickNoteRequest = 0, onQuickN
   const [treeOpen, setTreeOpen] = useState(false);
   const [noteSearch, setNoteSearch] = useState("");
   const [noteFilter, setNoteFilter] = useState("todas");
+  const [prompterPickerOpen, setPrompterPickerOpen] = useState(false);
+  const [prompterOpen, setPrompterOpen] = useState(false);
+  const [prompterNote, setPrompterNote] = useState(null);
   const isAdmin = profile?.rol === "admin";
 
   useEffect(() => {
     if (!isAdmin) return undefined;
-    const offFolders = listenNoteFolders(setFolders);
-    const offNotes = listenPrivateNotes(setNotes);
+    const offFolders = listenNoteFolders((nextFolders) => {
+      setFolders(nextFolders);
+      writeLocalCache(LOCAL_FOLDERS_CACHE_KEY, nextFolders);
+    });
+    const offNotes = listenPrivateNotes((nextNotes) => {
+      setNotes(nextNotes);
+      writeLocalCache(LOCAL_NOTES_CACHE_KEY, nextNotes);
+    });
     return () => {
       offFolders();
       offNotes();
@@ -178,7 +190,15 @@ export default function CuadernoAshram({ profile, quickNoteRequest = 0, onQuickN
     setTreeOpen(false);
   }
 
+  function openPrompterWithNote(note) {
+    setPrompterNote(note);
+    setSelectedNoteId(note.id);
+    setPrompterPickerOpen(false);
+    setPrompterOpen(true);
+  }
+
   const editorNote = editingNote || selectedNote || { folderId: selectedFolderId || "" };
+  const activePrompterFolder = folders.find((folder) => folder.id === prompterNote?.folderId);
 
   return (
     <div className={`notebook notebook-editor-mode ${treeOpen ? "tree-open" : ""}`}>
@@ -198,6 +218,7 @@ export default function CuadernoAshram({ profile, quickNoteRequest = 0, onQuickN
           </select>
         </label>
         <button className="ghost compact notebook-quick-note" type="button" onClick={createQuickNote}><Sparkles size={15} /> Rapida</button>
+        <button className="ghost compact notebook-prompter-button" type="button" onClick={() => setPrompterPickerOpen(true)}><Maximize2 size={15} /> Teleprompter</button>
         <button className="primary small" type="button" onClick={() => createNote("")}><Plus size={16} /> Nota</button>
       </div>
 
@@ -293,8 +314,232 @@ export default function CuadernoAshram({ profile, quickNoteRequest = 0, onQuickN
           </div>
         </main>
       </div>
+      {prompterPickerOpen ? (
+        <TeleprompterPicker
+          folders={folders}
+          notes={notes}
+          onClose={() => setPrompterPickerOpen(false)}
+          onSelect={openPrompterWithNote}
+        />
+      ) : null}
+      {prompterOpen ? (
+        <Teleprompter note={prompterNote} folder={activePrompterFolder} onClose={() => setPrompterOpen(false)} />
+      ) : null}
     </div>
   );
+}
+
+function TeleprompterPicker({ folders, notes, onClose, onSelect }) {
+  const [folderId, setFolderId] = useState("");
+  const [query, setQuery] = useState("");
+  const visibleNotes = useMemo(() => {
+    const cleanQuery = query.trim().toLowerCase();
+    return notes.filter((note) => {
+      const inFolder = folderId ? note.folderId === folderId : true;
+      const matchesQuery = cleanQuery
+        ? `${note.titulo || ""} ${note.contenidoMarkdown || ""}`.toLowerCase().includes(cleanQuery)
+        : true;
+      return inFolder && matchesQuery;
+    });
+  }, [folderId, notes, query]);
+
+  function folderName(id) {
+    return folders.find((folder) => folder.id === id)?.nombre || "Sin carpeta";
+  }
+
+  return (
+    <div className="teleprompter-backdrop">
+      <section className="prompter-picker">
+        <header>
+          <span>
+            <strong>Elegir guion</strong>
+            <small>{visibleNotes.length} notas disponibles</small>
+          </span>
+          <button className="icon-btn" type="button" onClick={onClose} title="Cerrar">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="prompter-picker-filters">
+          <label>
+            <FolderOpen size={15} />
+            <select value={folderId} onChange={(event) => setFolderId(event.target.value)}>
+              <option value="">Todas las carpetas</option>
+              {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.nombre}</option>)}
+            </select>
+          </label>
+          <label>
+            <Search size={15} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar guion..." />
+          </label>
+        </div>
+        <div className="prompter-note-list">
+          {visibleNotes.length === 0 ? <p className="empty-state">No hay notas para usar como teleprompter.</p> : null}
+          {visibleNotes.map((note) => (
+            <button key={note.id} type="button" onClick={() => onSelect(note)}>
+              <span>
+                <strong>{note.titulo || "Sin titulo"}</strong>
+                <small>{folderName(note.folderId)}</small>
+              </span>
+              <Play size={16} />
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Teleprompter({ note, folder, onClose }) {
+  const textRef = useRef(null);
+  const videoRef = useRef(null);
+  const frameRef = useRef(null);
+  const lastTickRef = useRef(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(34);
+  const [fontSize, setFontSize] = useState(42);
+  const [textColor, setTextColor] = useState("#ffffff");
+  const [background, setBackground] = useState("#050505");
+  const [backgroundOpacity, setBackgroundOpacity] = useState(32);
+  const [width, setWidth] = useState(96);
+  const [height, setHeight] = useState(92);
+  const [cameraOn, setCameraOn] = useState(true);
+  const [cameraError, setCameraError] = useState("");
+
+  const prompterText = useMemo(() => stripMarkdown(note?.contenidoMarkdown || ""), [note?.contenidoMarkdown]);
+
+  useEffect(() => {
+    if (!cameraOn) return undefined;
+    let stream;
+    let cancelled = false;
+
+    async function openCamera() {
+      try {
+        setCameraError("");
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      } catch {
+        setCameraError("No pude abrir la camara frontal.");
+      }
+    }
+
+    openCamera();
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((track) => track.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
+  }, [cameraOn]);
+
+  useEffect(() => {
+    if (!playing) {
+      window.cancelAnimationFrame(frameRef.current);
+      lastTickRef.current = 0;
+      return undefined;
+    }
+
+    function tick(timestamp) {
+      if (!lastTickRef.current) lastTickRef.current = timestamp;
+      const delta = (timestamp - lastTickRef.current) / 1000;
+      lastTickRef.current = timestamp;
+      if (textRef.current) {
+        textRef.current.scrollTop += speed * delta;
+      }
+      frameRef.current = window.requestAnimationFrame(tick);
+    }
+
+    frameRef.current = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameRef.current);
+  }, [playing, speed]);
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") onClose();
+      if (event.code === "Space") {
+        event.preventDefault();
+        setPlaying((current) => !current);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function resetScroll() {
+    if (textRef.current) textRef.current.scrollTop = 0;
+    setPlaying(false);
+  }
+
+  return (
+    <div className="teleprompter-backdrop">
+      <section className="teleprompter-panel" style={{ width: `${width}vw`, height: `${height}vh`, background }}>
+        {cameraOn ? <video ref={videoRef} className="teleprompter-camera" autoPlay playsInline muted /> : null}
+        <div className="teleprompter-tint" style={{ background, opacity: backgroundOpacity / 100 }} />
+        <header className="teleprompter-bar">
+          <span>
+            <strong>{note?.titulo || "Guion sin titulo"}</strong>
+            <small>{folder?.nombre || "Sin carpeta"}</small>
+          </span>
+          <button className="icon-btn" type="button" onClick={onClose} title="Cerrar">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="teleprompter-controls">
+          <button className="primary small" type="button" onClick={() => setPlaying((current) => !current)}>
+            {playing ? <Pause size={16} /> : <Play size={16} />}
+          </button>
+          <button className="ghost compact" type="button" onClick={resetScroll}>Inicio</button>
+          <button className="ghost compact" type="button" onClick={() => setCameraOn((current) => !current)}><Camera size={15} /> {cameraOn ? "Camara" : "Sin camara"}</button>
+          <label><Play size={14} /><input type="range" min="8" max="140" value={speed} onChange={(event) => setSpeed(Number(event.target.value))} /></label>
+          <label><Type size={14} /><input type="range" min="24" max="86" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} /></label>
+          <label><Palette size={14} /><input type="color" value={textColor} onChange={(event) => setTextColor(event.target.value)} /></label>
+          <label><Palette size={14} /><input type="range" min="0" max="92" value={backgroundOpacity} onChange={(event) => setBackgroundOpacity(Number(event.target.value))} /></label>
+          <label><Maximize2 size={14} /><input type="range" min="45" max="96" value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
+          <label><Maximize2 size={14} /><input type="range" min="38" max="92" value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
+          <input className="teleprompter-bg-input" type="color" value={background} onChange={(event) => setBackground(event.target.value)} title="Fondo" />
+        </div>
+
+        {cameraError ? <p className="teleprompter-camera-error">{cameraError}</p> : null}
+        <div ref={textRef} className="teleprompter-text" style={{ color: textColor, fontSize: `${fontSize}px` }}>
+          {prompterText || "Selecciona una nota con texto para usar el teleprompter."}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function stripMarkdown(markdown) {
+  return markdown
+    .replace(/!\[[^\]]*]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/<\/?(h\d|p|br|div|strong|em|b|i|ul|ol|li|blockquote|code)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/[#>*_`~-]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function readLocalCache(key) {
+  try {
+    const value = window.localStorage.getItem(key);
+    return value ? JSON.parse(value) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalCache(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Si el navegador no permite guardar localmente, la app sigue funcionando online.
+  }
 }
 
 function publishLabel(target) {

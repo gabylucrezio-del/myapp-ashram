@@ -5,6 +5,14 @@ web/node_modules/
 web/dist/
 node_modules/
 build/
+teleprompter-build/
+teleprompter-apk/.gradle/
+teleprompter-apk/app/build/
+registro-terapeutico-apk/.gradle/
+registro-terapeutico-apk/app/build/
+registro-terapeutico-apk/build/
+teleprompter_flet/build/
+**/local.properties
 
 .firebase/
 firebase-debug.log

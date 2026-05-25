@@ -1,0 +1,10 @@
+[project]
+name = "teleprompter-ashram-flet"
+version = "0.1.0"
+description = "Teleprompter local en Flet y Python"
+dependencies = ["flet==0.28.3"]
+
+[tool.flet]
+product = "Teleprompter Ashram"
+company = "Ashram Ganesha"
+copyright = "Ashram Ganesha"

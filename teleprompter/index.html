@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050505" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Teleprompter Ashram</title>
+  </head>
+  <body>
+    <main class="app">
+      <aside class="library">
+        <header class="library-head">
+          <span>
+            <strong>Teleprompter</strong>
+            <small>Guiones locales</small>
+          </span>
+          <button id="installButton" class="icon-button" type="button" title="Instalar">+</button>
+        </header>
+
+        <section class="toolbar">
+          <button id="newFolderButton" type="button">Carpeta</button>
+          <button id="newScriptButton" type="button">Guion</button>
+          <button id="exportButton" type="button">Exportar</button>
+          <label class="import-button">
+            Importar
+            <input id="importInput" type="file" accept="application/json" />
+          </label>
+        </section>
+
+        <label class="field">
+          <span>Carpeta</span>
+          <select id="folderFilter"></select>
+        </label>
+
+        <label class="field">
+          <span>Buscar</span>
+          <input id="searchInput" type="search" placeholder="Ayurveda, satsang..." />
+        </label>
+
+        <div id="folderList" class="folder-list"></div>
+        <div id="scriptList" class="script-list"></div>
+      </aside>
+
+      <section class="editor">
+        <div class="editor-head">
+          <input id="titleInput" class="title-input" placeholder="Titulo del guion" />
+          <select id="scriptFolderSelect"></select>
+          <button id="saveButton" type="button">Guardar</button>
+          <button id="deleteButton" class="danger" type="button">Borrar</button>
+          <button id="openPrompterButton" class="primary" type="button">Abrir</button>
+        </div>
+        <textarea id="scriptText" placeholder="Escribe o pega aqui tu guion..."></textarea>
+      </section>
+
+      <section id="prompter" class="prompter hidden">
+        <video id="cameraPreview" autoplay playsinline muted></video>
+        <div id="tint" class="tint"></div>
+
+        <header class="prompter-bar">
+          <span>
+            <strong id="prompterTitle">Guion</strong>
+            <small id="prompterFolder">Carpeta</small>
+          </span>
+          <button id="closePrompterButton" class="icon-button" type="button" title="Cerrar">x</button>
+        </header>
+
+        <div class="prompter-controls">
+          <button id="playButton" class="primary" type="button">Play</button>
+          <button id="resetButton" type="button">Inicio</button>
+          <button id="cameraButton" type="button">Camara</button>
+          <button id="fullscreenButton" type="button">Pantalla</button>
+          <button id="voiceButton" type="button">Voz</button>
+          <label>Cuenta <select id="countdownInput"><option value="0">0s</option><option value="3" selected>3s</option><option value="5">5s</option><option value="10">10s</option></select></label>
+          <label>Velocidad <input id="speedInput" type="range" min="30" max="420" value="150" /></label>
+          <label>Texto <input id="fontInput" type="range" min="24" max="92" value="44" /></label>
+          <label>Opacidad <input id="opacityInput" type="range" min="0" max="92" value="35" /></label>
+          <label>Color <input id="textColorInput" type="color" value="#ffffff" /></label>
+          <label>Fondo <input id="bgColorInput" type="color" value="#050505" /></label>
+        </div>
+
+        <p id="cameraMessage" class="camera-message hidden"></p>
+        <div id="countdownDisplay" class="countdown-display hidden"></div>
+        <div id="prompterViewport" class="prompter-viewport">
+          <div id="prompterText" class="prompter-text"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

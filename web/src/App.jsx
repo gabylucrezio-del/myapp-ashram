@@ -41,8 +41,19 @@ import {
   signOut,
 } from "firebase/auth";
 import { get, onValue, push, ref, remove, set, update } from "firebase/database";
+import {
+  addDoc,
+  collection,
+  doc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { deleteObject, ref as storageRef } from "firebase/storage";
-import { auth, db, storage } from "./firebase";
+import { auth, db, firestoreDb, storage } from "./firebase";
 import BookStudio from "./BookStudio";
 import CuadernoAshram from "./CuadernoAshram";
 import { parseEpubBuffer } from "./epubParser";
@@ -64,6 +75,7 @@ const DRIVE_ARCHIVE_FOLDER_ID = "1O081ln2XnQfDXVQUJaqlHnDOy3NMv1Cg";
 const EpubReader = lazy(() => import("./EpubReader"));
 const DRIVE_ARCHIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${DRIVE_ARCHIVE_FOLDER_ID}`;
 const GOOGLE_DRIVE_API_KEY = import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || "";
+const DEFAULT_LIVE_VIDEO = import.meta.env.VITE_ASHRAM_LIVE_VIDEO || "";
 let chatAudioContext = null;
 
 const sections = [
@@ -73,7 +85,8 @@ const sections = [
   { id: "ejercicios", label: "Ejercicios", icon: Dumbbell, iconSrc: "/icono_ejercicios.webp" },
   { id: "meditaciones", label: "Meditacion", icon: Headphones, iconSrc: "/icono_meditacion.webp" },
   { id: "satsang", label: "Satsang", icon: Heart, iconSrc: "/satsang.webp" },
-  { id: "tienda", label: "Tienda", icon: ShoppingBag },
+  { id: "en-vivo", label: "En Vivo", icon: Video, iconSrc: "/icono_en_vivo.svg" },
+  { id: "tienda", label: "Tienda", icon: ShoppingBag, iconSrc: "/icono_tienda.svg" },
 ];
 
 const adminSections = [
@@ -209,6 +222,15 @@ export default function App() {
 
   if (authState.loading) return <Splash />;
   if (!authState.user) {
+    if (view === "en-vivo") {
+      return (
+        <main className="app-shell public-live-shell">
+          <EnVivo user={null} profile={null} onBack={() => setView("home")} onToast={notify} />
+          <InstallPrompt />
+          {toast ? <div className="toast">{toast}</div> : null}
+        </main>
+      );
+    }
     return (
       <>
         <Login onToast={notify} />
@@ -234,6 +256,7 @@ export default function App() {
         {view === "ejercicios" && <Contenido coleccion="ejercicios" titulo="Ejercicios" profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
         {view === "meditaciones" && <Meditaciones user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onShare={openShare} />}
         {view === "satsang" && <Contenido coleccion="satsang" titulo="Satsang" user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
+        {view === "en-vivo" && <EnVivo user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "tienda" && <Tienda user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "chat" && <Chat user={authState.user} profile={authState.profile} onBack={() => navigate("home")} />}
         {view === "admin" && (
@@ -432,6 +455,7 @@ function Shell({ children, profile, view, setView, onLogout, onQuickNote }) {
     { id: "home", label: "Inicio", icon: BookOpen, iconSrc: APP_LOGO_SRC },
     sections.find((section) => section.id === "conocimiento"),
     sections.find((section) => section.id === "blog"),
+    sections.find((section) => section.id === "en-vivo"),
     isAdmin ? { id: "quick-note", label: "Rápida", icon: Sparkles, action: onQuickNote } : null,
     { id: "chat", label: "Chat", icon: MessageCircle },
   ].filter(Boolean);
@@ -2270,6 +2294,205 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
   );
 }
 
+function EnVivo({ user, profile, onBack, onToast }) {
+  const [liveConfig, setLiveConfig] = useState({
+    videoUrl: DEFAULT_LIVE_VIDEO,
+    titulo: "Satsang en vivo",
+    proximoTexto: "Próximo satsang",
+  });
+  const [adminDraft, setAdminDraft] = useState({
+    videoUrl: DEFAULT_LIVE_VIDEO,
+    titulo: "Satsang en vivo",
+    proximoTexto: "Próximo satsang",
+  });
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const isAdmin = profile?.rol === "admin";
+  const activeVideo = liveConfig.videoUrl || liveConfig.videoId || DEFAULT_LIVE_VIDEO;
+  const embedUrl = liveEmbedUrl(activeVideo);
+  const isLive = Boolean(embedUrl);
+
+  useEffect(() => {
+    const unsubscribeConfig = onSnapshot(doc(firestoreDb, "config", "enVivo"), (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data() || {};
+      setLiveConfig((current) => ({
+        ...current,
+        videoUrl: data.videoUrl || data.link || "",
+        videoId: data.videoId || "",
+        titulo: data.titulo || current.titulo,
+        proximoTexto: data.proximoTexto || current.proximoTexto,
+      }));
+      setAdminDraft({
+        videoUrl: data.videoUrl || data.link || "",
+        titulo: data.titulo || "Satsang en vivo",
+        proximoTexto: data.proximoTexto || "Próximo satsang",
+      });
+    });
+
+    const messagesQuery = query(collection(firestoreDb, "enVivoMensajes"), orderBy("createdAt", "asc"), limit(100));
+    const unsubscribeMessages = onSnapshot(messagesQuery, (snap) => {
+      setMessages(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+    });
+
+    return () => {
+      unsubscribeConfig();
+      unsubscribeMessages();
+    };
+  }, []);
+
+  async function saveLiveConfig(event) {
+    event.preventDefault();
+    if (!isAdmin) return;
+    setSavingConfig(true);
+    try {
+      await setDoc(doc(firestoreDb, "config", "enVivo"), {
+        videoUrl: adminDraft.videoUrl.trim(),
+        titulo: adminDraft.titulo.trim() || "Satsang en vivo",
+        proximoTexto: adminDraft.proximoTexto.trim() || "Próximo satsang",
+        actualizadoEn: serverTimestamp(),
+        actualizadoPor: user?.uid || "",
+      }, { merge: true });
+      onToast?.("Link del vivo actualizado.");
+    } catch {
+      onToast?.("No se pudo guardar el link del vivo.");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  async function sendLiveMessage(event) {
+    event.preventDefault();
+    const cleanMessage = text.trim();
+    if (!user) {
+      onToast?.("Inicia sesion para comentar en el vivo.");
+      return;
+    }
+    if (!cleanMessage) return;
+    setBusy(true);
+    try {
+      await addDoc(collection(firestoreDb, "enVivoMensajes"), {
+        uid: user.uid,
+        nombre: profileDisplayName(profile) || user.email || "Usuario",
+        email: user.email || "",
+        texto: cleanMessage,
+        createdAt: serverTimestamp(),
+        createdAtLocal: new Date().toISOString(),
+      });
+      setText("");
+    } catch {
+      onToast?.("No se pudo enviar el mensaje.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="content-page live-page">
+      <PageTitle icon={Video} title="En Vivo" subtitle="Satsang, practica y comunidad en tiempo real." onBack={onBack} />
+      <div className="live-status-card">
+        <span className={`live-pill ${isLive ? "active" : ""}`}>{isLive ? "En vivo ahora" : "Próximo satsang"}</span>
+        <strong>{isLive ? liveConfig.titulo || "Transmision en vivo" : liveConfig.proximoTexto || "Próximo satsang"}</strong>
+        <small>{isLive ? "Podes mirar la transmision y compartir en el chat comunitario." : "Todavia no hay transmision activa. El chat queda disponible para la comunidad."}</small>
+      </div>
+
+      {isAdmin ? (
+        <form className="live-admin-card" onSubmit={saveLiveConfig}>
+          <header>
+            <strong>Administrar transmision</strong>
+            <small>Solo vos ves este panel.</small>
+          </header>
+          <label>
+            Link de YouTube Live
+            <input
+              value={adminDraft.videoUrl}
+              onChange={(event) => setAdminDraft((current) => ({ ...current, videoUrl: event.target.value }))}
+              placeholder="https://www.youtube.com/watch?v=..."
+            />
+          </label>
+          <label>
+            Titulo visible
+            <input
+              value={adminDraft.titulo}
+              onChange={(event) => setAdminDraft((current) => ({ ...current, titulo: event.target.value }))}
+              placeholder="Satsang en vivo"
+            />
+          </label>
+          <label>
+            Texto cuando no hay vivo
+            <input
+              value={adminDraft.proximoTexto}
+              onChange={(event) => setAdminDraft((current) => ({ ...current, proximoTexto: event.target.value }))}
+              placeholder="Próximo satsang"
+            />
+          </label>
+          <div className="live-admin-actions">
+            <button
+              className="ghost compact"
+              type="button"
+              onClick={() => setAdminDraft((current) => ({ ...current, videoUrl: "" }))}
+            >
+              Dejar sin vivo
+            </button>
+            <button className="primary" disabled={savingConfig}>
+              {savingConfig ? "Guardando..." : "Guardar link"}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="live-video-frame">
+        {embedUrl ? (
+          <iframe
+            title="Ashram Ganesha en vivo"
+            src={embedUrl}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        ) : (
+          <div className="live-placeholder">
+            <Video size={42} />
+            <strong>Próximo satsang</strong>
+            <small>Cuando haya un link activo, el video aparecera aqui.</small>
+          </div>
+        )}
+      </div>
+
+      <div className="live-chat-card">
+        <header>
+          <span>
+            <strong>Chat comunitario</strong>
+            <small>{user ? "Compartiendo como " + profileDisplayName(profile) : "Inicia sesion para comentar"}</small>
+          </span>
+        </header>
+        <div className="live-chat-messages">
+          {messages.length === 0 ? <p className="empty-state">Aun no hay mensajes en este vivo.</p> : null}
+          {messages.map((message) => (
+            <article className="live-chat-message" key={message.id}>
+              <strong>{message.nombre || "Usuario"}</strong>
+              <p>{message.texto}</p>
+              <small>{formatLiveDate(message.createdAt, message.createdAtLocal)}</small>
+            </article>
+          ))}
+        </div>
+        <form className="live-chat-input" onSubmit={sendLiveMessage}>
+          <input
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder={user ? "Escribe un mensaje..." : "Inicia sesion para comentar"}
+            disabled={!user || busy}
+          />
+          <button className="primary" disabled={!user || busy}>
+            Enviar
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+}
+
 function ProductAdminForm({ item, onCancel, onSaved, onToast }) {
   const [form, setForm] = useState({
     nombre: item.nombre || "",
@@ -2524,10 +2747,31 @@ function sectionSubtitle(id) {
     ejercicios: "Practicas simples para habitar el cuerpo.",
     meditaciones: "Un momento para volver al centro.",
     satsang: "Encuentros, palabras y presencia compartida.",
+    "en-vivo": "Satsang y comunidad en tiempo real.",
     tienda: "Productos del Ashram para acompanar tu practica.",
     chat: "Un canal directo para acompanarte.",
   };
   return subtitles[id] || "";
+}
+
+function liveEmbedUrl(value) {
+  const cleanValue = String(value || "").trim();
+  if (!cleanValue) return "";
+  if (/^[a-zA-Z0-9_-]{8,}$/.test(cleanValue) && !cleanValue.includes("http")) {
+    return `https://www.youtube-nocookie.com/embed/${cleanValue}?rel=0&playsinline=1&autoplay=1`;
+  }
+  return youtubeEmbedUrl(cleanValue);
+}
+
+function formatLiveDate(timestamp, fallback) {
+  const date = timestamp?.toDate ? timestamp.toDate() : fallback ? new Date(fallback) : null;
+  if (!date || Number.isNaN(date.getTime())) return "Ahora";
+  return date.toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function sectionFallbackImage(id) {

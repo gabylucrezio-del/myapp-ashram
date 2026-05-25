@@ -1,0 +1,347 @@
+:root {
+  color: #29251c;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f5efe2;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+.import-button {
+  min-height: 38px;
+  border: 1px solid rgba(108, 93, 58, 0.22);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #29251c;
+  background: #fffdf8;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.primary {
+  border-color: #5e5a2e;
+  color: #fff;
+  background: #5e5a2e;
+}
+
+.danger {
+  color: #a33a2a;
+}
+
+.app {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+}
+
+.library {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border-right: 1px solid rgba(108, 93, 58, 0.18);
+  background: #fff8e7;
+}
+
+.library-head,
+.editor-head,
+.prompter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-head {
+  justify-content: space-between;
+}
+
+.library-head span,
+.prompter-bar span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.library-head strong {
+  font-size: 20px;
+}
+
+small {
+  color: #6c6840;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.import-button {
+  display: grid;
+  place-items: center;
+}
+
+.import-button input {
+  display: none;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+  color: #6c6840;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.field input,
+.field select,
+.title-input,
+.editor-head select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(108, 93, 58, 0.22);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fffdf8;
+}
+
+.folder-list,
+.script-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.folder-row,
+.script-row {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(108, 93, 58, 0.16);
+  border-radius: 8px;
+  padding: 9px;
+  background: rgba(255, 253, 248, 0.7);
+  text-align: left;
+}
+
+.folder-row.active,
+.script-row.active {
+  border-color: #d9bd79;
+  background: #fffdf8;
+}
+
+.script-row small,
+.script-row strong,
+.folder-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+}
+
+.editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px) auto auto auto;
+}
+
+.script-list {
+  min-height: 0;
+}
+
+textarea {
+  width: 100%;
+  min-height: 0;
+  border: 1px solid rgba(108, 93, 58, 0.22);
+  border-radius: 10px;
+  padding: 16px;
+  resize: none;
+  background: #fffdf8;
+  line-height: 1.55;
+}
+
+.icon-button {
+  width: 38px;
+  padding: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.prompter {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  background: #050505;
+}
+
+.prompter video,
+.tint {
+  position: absolute;
+  inset: 0;
+}
+
+.prompter video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  background: #050505;
+}
+
+.tint {
+  pointer-events: none;
+}
+
+.prompter-bar,
+.prompter-controls {
+  position: relative;
+  z-index: 2;
+  background: rgba(255, 253, 248, 0.88);
+  backdrop-filter: blur(8px);
+}
+
+.prompter-bar {
+  justify-content: space-between;
+  padding: 8px;
+}
+
+.prompter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+}
+
+.prompter-controls label {
+  min-width: 120px;
+  display: grid;
+  grid-template-columns: auto minmax(70px, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: #4f4929;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.prompter-controls select {
+  min-height: 30px;
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+.prompter-controls input[type="range"] {
+  padding: 0;
+}
+
+.prompter-controls input[type="color"] {
+  width: 34px;
+  height: 30px;
+  padding: 2px;
+}
+
+.camera-message {
+  position: relative;
+  z-index: 2;
+  justify-self: center;
+  margin: 8px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: #a33a2a;
+  background: rgba(255, 253, 248, 0.88);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.countdown-display {
+  position: relative;
+  z-index: 3;
+  align-self: center;
+  justify-self: center;
+  min-width: 110px;
+  border-radius: 22px;
+  padding: 12px 24px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.52);
+  font-size: clamp(48px, 14vw, 120px);
+  font-weight: 900;
+  text-align: center;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.72);
+}
+
+.prompter-viewport {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.prompter-text {
+  padding: 18vh 9vw 52vh;
+  color: #fff;
+  font-size: 44px;
+  font-weight: 850;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: center;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.72);
+  white-space: pre-wrap;
+  will-change: transform;
+}
+
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .library {
+    min-height: auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(108, 93, 58, 0.18);
+  }
+
+  .editor-head {
+    grid-template-columns: 1fr;
+  }
+
+  .editor {
+    min-height: 58dvh;
+  }
+
+  .prompter-controls {
+    max-height: 42dvh;
+    overflow-y: auto;
+  }
+
+  .prompter-text {
+    padding-inline: 7vw;
+    font-size: 34px;
+  }
+}
