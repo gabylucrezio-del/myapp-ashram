@@ -1,6 +1,7 @@
-import {
+﻿import {
   ArrowLeft,
   BookOpen,
+  CalendarDays,
   Eye,
   EyeOff,
   Lock,
@@ -10,6 +11,7 @@ import {
   Pause,
   Play,
   Send,
+  Settings,
   Share2,
   ShoppingBag,
   ShoppingCart,
@@ -25,19 +27,20 @@ import {
   Plus,
   Shield,
   SlidersHorizontal,
-  Sparkles,
   Trash2,
   Upload,
   User,
   Video,
   X,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
 } from "firebase/auth";
 import { get, onValue, push, ref, remove, set, update } from "firebase/database";
@@ -53,13 +56,14 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { deleteObject, ref as storageRef } from "firebase/storage";
-import { auth, db, firestoreDb, storage } from "./firebase";
+import { auth, db, firebaseConfig, firestoreDb, storage } from "./firebase";
 import BookStudio from "./BookStudio";
 import CuadernoAshram from "./CuadernoAshram";
 import { parseEpubBuffer } from "./epubParser";
 import {
   cleanText,
   downloadUrl,
+  firebaseKey,
   optimizeImageToDataUrl,
   pdfViewerUrl,
   uploadAudio,
@@ -76,17 +80,20 @@ const EpubReader = lazy(() => import("./EpubReader"));
 const DRIVE_ARCHIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${DRIVE_ARCHIVE_FOLDER_ID}`;
 const GOOGLE_DRIVE_API_KEY = import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || "";
 const DEFAULT_LIVE_VIDEO = import.meta.env.VITE_ASHRAM_LIVE_VIDEO || "";
+const MAIN_MENU_CONFIG_PATH = "config/menuPrincipal";
+const googleProvider = new GoogleAuthProvider();
 let chatAudioContext = null;
 
 const sections = [
-  { id: "biblioteca", label: "Biblioteca", icon: Library, iconSrc: "/icono_biblioteca.webp" },
-  { id: "conocimiento", label: "Conocimiento", icon: GraduationCap, iconSrc: "/icono_conocimiento.webp" },
-  { id: "blog", label: "Blog", icon: Newspaper, iconSrc: "/icono_blog.webp" },
-  { id: "ejercicios", label: "Ejercicios", icon: Dumbbell, iconSrc: "/icono_ejercicios.webp" },
-  { id: "meditaciones", label: "Meditacion", icon: Headphones, iconSrc: "/icono_meditacion.webp" },
-  { id: "satsang", label: "Satsang", icon: Heart, iconSrc: "/satsang.webp" },
-  { id: "en-vivo", label: "En Vivo", icon: Video, iconSrc: "/icono_en_vivo.svg" },
-  { id: "tienda", label: "Tienda", icon: ShoppingBag, iconSrc: "/icono_tienda.svg" },
+  { id: "biblioteca", label: "Biblioteca", phrase: "Cada lectura abre una puerta interior.", icon: Library, iconSrc: "/icono_biblioteca.webp" },
+  { id: "conocimiento", label: "Conocimiento", phrase: "La sabiduria florece en la practica.", icon: GraduationCap, iconSrc: "/icono_conocimiento.webp" },
+  { id: "blog", label: "Blog", phrase: "Palabras para escuchar el alma.", icon: Newspaper, iconSrc: "/icono_blog.webp" },
+  { id: "ejercicios", label: "Ejercicios", phrase: "El cuerpo tambien recuerda la luz.", icon: Dumbbell, iconSrc: "/icono_ejercicios.webp" },
+  { id: "meditaciones", label: "Meditacion", phrase: "Respira. El centro siempre espera.", icon: Headphones, iconSrc: "/icono_meditacion.webp" },
+  { id: "satsang", label: "Satsang", phrase: "La presencia compartida enciende el alma.", icon: Heart, iconSrc: "/satsang.webp" },
+  { id: "en-vivo", label: "En Vivo", phrase: "El instante nos reune en conciencia.", icon: Video, iconSrc: "/icono_en_vivo.svg" },
+  { id: "sesiones", label: "Sesiones", phrase: "Un espacio privado para tu camino.", icon: CalendarDays },
+  { id: "tienda", label: "Tienda", phrase: "Elementos para honrar tu practica.", icon: ShoppingBag, iconSrc: "/icono_tienda.svg" },
 ];
 
 const adminSections = [
@@ -101,14 +108,15 @@ const adminSections = [
   { id: "tienda", label: "Tienda", icon: ShoppingBag },
   { id: "libros", label: "Libros", icon: BookOpen },
   { id: "cuaderno", label: "Cuaderno", icon: Library },
+  { id: "configuracion", label: "Configuracion", icon: Settings },
 ];
 
 export default function App() {
   const [authState, setAuthState] = useState({ loading: true, user: null, profile: null });
   const [view, setView] = useState(hashView());
+  const [menuConfig, setMenuConfig] = useState(defaultMainMenuConfig);
   const [toast, setToast] = useState("");
   const [pendingSubscription, setPendingSubscription] = useState(null);
-  const [quickNoteRequest, setQuickNoteRequest] = useState(0);
   const [shareDraft, setShareDraft] = useState(null);
 
   useEffect(() => {
@@ -140,6 +148,14 @@ export default function App() {
   useEffect(() => {
     window.addEventListener("pointerdown", unlockNotificationSound, { once: true });
     return () => window.removeEventListener("pointerdown", unlockNotificationSound);
+  }, []);
+
+  useEffect(() => {
+    return onValue(ref(db, MAIN_MENU_CONFIG_PATH), (snap) => {
+      setMenuConfig(normalizeMainMenuConfig(snap.val()));
+    }, (error) => {
+      console.warn("No pude leer la configuracion del menu principal", error);
+    });
   }, []);
 
   useEffect(() => {
@@ -178,6 +194,10 @@ export default function App() {
 
   function navigate(nextView) {
     if (nextView === view) return;
+    if (isMainMenuSection(nextView) && !isMainMenuEnabled(menuConfig, nextView)) {
+      notify("Esta seccion esta deshabilitada por administracion.");
+      return;
+    }
     window.history.pushState({ view: nextView }, "", `#${nextView}`);
     setView(nextView);
   }
@@ -192,11 +212,6 @@ export default function App() {
     }));
   }
 
-  function openQuickNote() {
-    setQuickNoteRequest(Date.now());
-    navigate("admin");
-  }
-
   function openShare(section, item) {
     const draft = createShareDraft(section, item);
     if (draft) setShareDraft(draft);
@@ -207,7 +222,7 @@ export default function App() {
     const missing = missingProfileFields(profile);
     if (missing.length > 0) {
       const wantsProfile = window.confirm(
-        `Para acompañar tu solicitud faltan estos datos: ${missing.join(", ")}. Queres completar tu perfil ahora?`,
+        `Para acompañar tu solicitud faltan estos datos: ${missing.join(", ")}. ¿Querés completar tu perfil ahora?`,
       );
       if (!wantsProfile) {
         notify("Completa tu perfil para enviar la solicitud.");
@@ -244,12 +259,12 @@ export default function App() {
       <Shell
         profile={authState.profile}
         view={view}
+        menuConfig={menuConfig}
         setView={navigate}
         onToast={notify}
         onLogout={() => signOut(auth)}
-        onQuickNote={openQuickNote}
       >
-        {view === "home" && <Home profile={authState.profile} setView={navigate} />}
+        {view === "home" && <Home profile={authState.profile} menuConfig={menuConfig} setView={navigate} />}
         {view === "biblioteca" && <Biblioteca profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onShare={openShare} />}
         {view === "conocimiento" && <Contenido coleccion="conocimiento" titulo="Conocimiento" profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
         {view === "blog" && <Blog user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onShare={openShare} />}
@@ -257,13 +272,13 @@ export default function App() {
         {view === "meditaciones" && <Meditaciones user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onShare={openShare} />}
         {view === "satsang" && <Contenido coleccion="satsang" titulo="Satsang" user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
         {view === "en-vivo" && <EnVivo user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
+        {view === "sesiones" && <Sesiones user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "tienda" && <Tienda user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "chat" && <Chat user={authState.user} profile={authState.profile} onBack={() => navigate("home")} />}
         {view === "admin" && (
           <Admin
             profile={authState.profile}
-            quickNoteRequest={quickNoteRequest}
-            onQuickNoteHandled={() => setQuickNoteRequest(0)}
+            menuConfig={menuConfig}
             onToast={notify}
             onBack={() => navigate("home")}
           />
@@ -408,6 +423,24 @@ function Login({ onToast }) {
     }
   }
 
+  async function signInWithGoogle() {
+    setBusy(true);
+    try {
+      const credential = await signInWithPopup(auth, googleProvider);
+      const profileRef = ref(db, `usuarios/${credential.user.uid}`);
+      const profileSnap = await get(profileRef);
+      if (!profileSnap.exists()) {
+        await set(profileRef, defaultUserProfile(credential.user));
+      }
+    } catch (error) {
+      if (error.code !== "auth/popup-closed-by-user") {
+        onToast("No se pudo iniciar con Google.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="login-screen">
       <img className="login-bg" src="/fondo_app.webp" alt="" />
@@ -435,6 +468,15 @@ function Login({ onToast }) {
         <button className="primary" disabled={busy}>
           {busy ? "Procesando..." : mode === "register" ? "Registrarme" : "Entrar"}
         </button>
+        {mode === "login" ? (
+          <>
+            <div className="login-separator"><span>o</span></div>
+            <button className="google-login" type="button" onClick={signInWithGoogle} disabled={busy}>
+              <GoogleIcon />
+              Iniciar con Google
+            </button>
+          </>
+        ) : null}
         {mode === "login" && (
           <button className="ghost" type="button" onClick={resetPassword}>
             Olvide mi contrasena
@@ -448,15 +490,24 @@ function Login({ onToast }) {
   );
 }
 
-function Shell({ children, profile, view, setView, onLogout, onQuickNote }) {
+function GoogleIcon() {
+  return (
+    <svg className="google-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+      <path fill="#FBBC05" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06L5.84 9.9C6.71 7.31 9.14 5.38 12 5.38z" />
+    </svg>
+  );
+}
+
+function Shell({ children, profile, view, menuConfig, setView, onLogout }) {
   const isAdmin = profile?.rol === "admin";
   const profileName = profileDisplayName(profile);
   const navItems = [
     { id: "home", label: "Inicio", icon: BookOpen, iconSrc: APP_LOGO_SRC },
-    sections.find((section) => section.id === "conocimiento"),
-    sections.find((section) => section.id === "blog"),
+    sections.find((section) => section.id === "sesiones"),
     sections.find((section) => section.id === "en-vivo"),
-    isAdmin ? { id: "quick-note", label: "Rápida", icon: Sparkles, action: onQuickNote } : null,
     { id: "chat", label: "Chat", icon: MessageCircle },
   ].filter(Boolean);
 
@@ -485,18 +536,21 @@ function Shell({ children, profile, view, setView, onLogout, onQuickNote }) {
       </header>
       {children}
       <nav className={`bottom-nav ${isAdmin ? "admin-bottom-nav" : ""}`}>
-        {navItems.map(({ id, label, icon: Icon, iconSrc, action }) => (
-          <button key={id} className={view === id ? "active" : ""} onClick={() => action ? action() : setView(id)}>
+        {navItems.map(({ id, label, icon: Icon, iconSrc, action }) => {
+          const disabled = isMainMenuSection(id) && !isMainMenuEnabled(menuConfig, id);
+          return (
+          <button key={id} className={view === id ? "active" : ""} onClick={() => action ? action() : setView(id)} disabled={disabled}>
             {iconSrc ? <img className="nav-icon" src={iconSrc} alt="" /> : <Icon size={19} />}
             <span>{label}</span>
           </button>
-        ))}
+          );
+        })}
       </nav>
     </main>
   );
 }
 
-function Home({ profile, setView }) {
+function Home({ profile, menuConfig, setView }) {
   const [banners, setBanners] = useState([]);
   const [bannerIndex, setBannerIndex] = useState(0);
 
@@ -541,18 +595,450 @@ function Home({ profile, setView }) {
         </div>
       </button>
       <div className="module-grid">
-        {sections.map(({ id, label, icon: Icon, iconSrc }) => (
-          <button key={id} className="module-tile" onClick={() => setView(id)}>
-            {iconSrc ? <img className="module-icon" src={iconSrc} alt="" /> : <Icon size={34} />}
-            <span>{label}</span>
-          </button>
-        ))}
+        {sections.map(({ id, label, phrase, icon: Icon, iconSrc }) => {
+          const disabled = !isMainMenuEnabled(menuConfig, id);
+          return (
+            <button key={id} className="module-tile" onClick={() => setView(id)} disabled={disabled}>
+              {iconSrc ? <img className="module-icon" src={iconSrc} alt="" /> : <Icon size={34} />}
+              <span className="module-title">{label}</span>
+              <small>{phrase}</small>
+            </button>
+          );
+        })}
         <button className="module-tile muted" onClick={() => setView("perfil")}>
           <img className="module-icon" src="/icono_perfil.webp" alt="" />
           <span>Mi perfil</span>
         </button>
       </div>
     </section>
+  );
+}
+
+function Sesiones({ user, profile, onBack, onToast }) {
+  const isAdmin = profile?.rol === "admin";
+  const [sessions, setSessions] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [selectedDay, setSelectedDay] = useState("");
+  const [showDayForm, setShowDayForm] = useState(false);
+  const [form, setForm] = useState({
+    id: "",
+    nombre: profileDisplayName(profile),
+    telefono: profile?.telefono || "",
+    tipo: "Coaching espiritual",
+    fecha: "",
+    motivo: "",
+  });
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+  const optimisticSessionsRef = useRef(new Map());
+
+  function mergeOptimisticSessions(nextSessions) {
+    let merged = nextSessions;
+    optimisticSessionsRef.current.forEach((session) => {
+      merged = upsertById(merged, session);
+    });
+    return sortSessionsByDate(merged);
+  }
+
+  useEffect(() => {
+    if (isAdmin) {
+      let cancelled = false;
+      async function loadAdminSessions() {
+        try {
+          const nextSessions = await fetchSessionsByRest();
+          if (cancelled) return;
+          setSessions(mergeOptimisticSessions(nextSessions));
+          setSelected((current) => current ? nextSessions.find((item) => item.id === current.id) || current : null);
+        } catch (error) {
+          if (!cancelled) onToast?.(`No pude leer la agenda: ${error.message}`);
+        }
+      }
+      loadAdminSessions();
+      const interval = window.setInterval(loadAdminSessions, 8000);
+      return () => {
+        cancelled = true;
+        window.clearInterval(interval);
+      };
+    }
+
+    return onValue(ref(db, "sesiones"), (snap) => {
+      const value = snap.val() || {};
+      const nextSessions = Object.entries(value)
+        .map(([id, item]) => ({ id, ...item }))
+        .filter((item) => isAdmin || item.uid === user.uid)
+        .sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
+      setSessions(nextSessions);
+      setSelected((current) => current ? nextSessions.find((item) => item.id === current.id) || current : null);
+    }, (error) => {
+      onToast?.(`No pude leer la agenda: ${error.message}`);
+    });
+  }, [isAdmin, onToast, user.uid]);
+
+  useEffect(() => {
+    setNotes(selected?.notas || "");
+  }, [selected?.id]);
+
+  async function refreshAdminSessions() {
+    if (!isAdmin) return;
+    const nextSessions = await fetchSessionsByRest();
+    setSessions(mergeOptimisticSessions(nextSessions));
+    setSelected((current) => current ? nextSessions.find((item) => item.id === current.id) || current : null);
+  }
+
+  async function bookSession(event) {
+    event?.preventDefault?.();
+    if (!isAdmin && !cleanText(form.nombre)) return onToast?.("Completa tu nombre.");
+    if (isAdmin && !cleanText(form.fecha)) return onToast?.("Elegí día y horario.");
+    setBusy(true);
+    setSaveStatus("Guardando turno...");
+    try {
+      const isEditing = Boolean(form.id);
+      const createdAt = new Date().toISOString();
+      const room = sessionRoomName(user.uid, form.fecha || createdAt);
+      const sessionData = {
+        uid: user.uid,
+        usuario_email: user.email || "",
+        nombre: cleanText(form.nombre) || "Turno reservado",
+        telefono: cleanText(form.telefono),
+        tipo: cleanText(form.tipo) || "Coaching espiritual",
+        fecha: isAdmin ? form.fecha : "",
+        motivo: cleanText(form.motivo),
+        sala: room,
+        estado: isAdmin ? "reservado" : "solicitado",
+        notas: "",
+        fecha_creacion: createdAt,
+      };
+      const savedSession = isEditing
+        ? await updateExistingSessionWithFallback(form.id, {
+          ...sessionData,
+          sala: form.sala || room,
+          notas: form.notas || "",
+          fecha_creacion: form.fecha_creacion || createdAt,
+          fecha_actualizacion: createdAt,
+        })
+        : await saveSessionWithFallback(sessionData);
+      optimisticSessionsRef.current.set(savedSession.id, savedSession);
+      const savedDay = sessionDayKey(savedSession.fecha);
+      if (isAdmin && savedDay && savedDay !== "sin-fecha") setSelectedDay(savedDay);
+      setSessions((current) => sortSessionsByDate(upsertById(current, savedSession)));
+      setShowDayForm(false);
+      setForm({
+        id: "",
+        nombre: isAdmin ? "" : profileDisplayName(profile),
+        telefono: isAdmin ? "" : profile?.telefono || "",
+        tipo: "Coaching espiritual",
+        fecha: isAdmin && savedDay && savedDay !== "sin-fecha" ? dateTimeForDay(savedDay) : "",
+        motivo: "",
+      });
+      setSaveStatus(`Turno guardado: ${formatSessionTime(savedSession.fecha)} ${savedSession.nombre}.`);
+      onToast?.(isAdmin ? `Turno ${isEditing ? "actualizado" : "creado"}: ${formatSessionTime(savedSession.fecha)} ${savedSession.nombre}.` : "Solicitud enviada. Te confirmaremos día y horario.");
+      window.setTimeout(() => {
+        optimisticSessionsRef.current.delete(savedSession.id);
+        refreshAdminSessions().catch(() => {});
+      }, 12000);
+    } catch (error) {
+      setSaveStatus(`No se pudo guardar: ${error.message || "error desconocido"}`);
+      onToast?.(`No se pudo guardar turno: ${error.message || "error desconocido"}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateSessionStatus(session, estado) {
+    const changes = { estado };
+    await updateSessionWithFallback(session.id, changes);
+    setSessions((current) => sortSessionsByDate(upsertById(current, { ...session, ...changes })));
+    setSelected((current) => current?.id === session.id ? { ...current, ...changes } : current);
+    onToast?.(estado === "finalizada" ? "Sesión finalizada." : "Sesión actualizada.");
+  }
+
+  async function scheduleSession(session, fecha) {
+    if (!cleanText(fecha)) return onToast?.("Elegí día y horario.");
+    const changes = {
+      fecha,
+      estado: "reservado",
+      sala: session.sala || sessionRoomName(session.uid || user.uid, fecha),
+      fecha_confirmacion: new Date().toISOString(),
+    };
+    await updateSessionWithFallback(session.id, changes);
+    setSessions((current) => sortSessionsByDate(upsertById(current, { ...session, ...changes })));
+    onToast?.("Turno confirmado en la agenda.");
+  }
+
+  async function saveNotes() {
+    if (!selected) return;
+    const changes = { notas: notes, notas_actualizadas: new Date().toISOString() };
+    await updateSessionWithFallback(selected.id, changes);
+    setSessions((current) => sortSessionsByDate(upsertById(current, { ...selected, ...changes })));
+    setSelected((current) => current ? { ...current, ...changes } : current);
+    onToast?.("Notas guardadas.");
+  }
+
+  async function deleteSession(session) {
+    if (!session?.id || !window.confirm(`¿Borrar el turno de ${session.nombre || "Turno reservado"}?`)) return;
+    try {
+      await deleteSessionWithFallback(session.id);
+      setSessions((current) => current.filter((item) => item.id !== session.id));
+      refreshAdminSessions().catch(() => {});
+      onToast?.("Turno borrado.");
+    } catch (error) {
+      onToast?.(`No se pudo borrar el turno: ${error.message || "error desconocido"}`);
+    }
+  }
+
+  function openSessionCall(session) {
+    const roomUrl = jitsiRoomUrl(session.sala || sessionRoomName(session.uid || user.uid, session.fecha));
+    window.open(roomUrl, "_blank", "noopener,noreferrer");
+  }
+
+  if (selected) {
+    const roomUrl = jitsiRoomUrl(selected.sala || sessionRoomName(selected.uid || user.uid, selected.fecha));
+    return (
+      <section className="content-page sessions-page">
+        <PageTitle icon={Video} title="Sesión 1 a 1" subtitle={selected.nombre || "Coaching espiritual"} onBack={() => setSelected(null)} />
+        <div className="session-workspace">
+          <article className="session-card">
+            <small>{sessionStatusLabel(selected.estado)} - {formatSessionDate(selected.fecha)}</small>
+            <h2>{selected.tipo || "Coaching espiritual"}</h2>
+            {selected.motivo ? <p>{selected.motivo}</p> : <p>Espacio privado de acompañamiento.</p>}
+            <div className="session-call-card">
+              <strong>Videollamada lista</strong>
+              <small>Se abre fuera de la app para que cámara y micrófono funcionen mejor.</small>
+              <button className="primary" type="button" onClick={() => openSessionCall(selected)}>
+                <Video size={18} /> Entrar a la videollamada
+              </button>
+              <a href={roomUrl} target="_blank" rel="noreferrer">Abrir enlace de respaldo</a>
+            </div>
+            {isAdmin ? (
+              <div className="session-actions">
+                <button className="primary small" type="button" onClick={() => updateSessionStatus(selected, "en curso")}>Marcar en curso</button>
+                <button className="ghost compact" type="button" onClick={() => updateSessionStatus(selected, "finalizada")}>Finalizar</button>
+              </div>
+            ) : null}
+          </article>
+          {isAdmin ? (
+            <form className="session-notes" onSubmit={(event) => { event.preventDefault(); saveNotes(); }}>
+              <label>Notas de la sesión<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Tema trabajado, observaciones, tarea espiritual..." /></label>
+              <button className="primary small" type="submit">Guardar notas</button>
+            </form>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
+
+  const requests = sessions.filter((item) => item.estado === "solicitado");
+  const upcoming = sessions.filter((item) => item.estado !== "finalizada" && item.estado !== "solicitado");
+  const past = sessions.filter((item) => item.estado === "finalizada");
+  const selectedDaySessions = selectedDay
+    ? upcoming.filter((item) => sessionDayKey(item.fecha) === selectedDay)
+    : [];
+
+  function openDay(day) {
+    setSelectedDay(day);
+    setShowDayForm(false);
+    setForm((current) => ({
+      ...current,
+      fecha: dateTimeForDay(day),
+    }));
+  }
+
+  function openDayForm() {
+    setShowDayForm(true);
+    setForm((current) => ({
+      ...current,
+      id: "",
+      nombre: "",
+      telefono: "",
+      tipo: "Coaching espiritual",
+      fecha: dateTimeForDay(selectedDay),
+      motivo: "",
+    }));
+  }
+
+  function editSession(session) {
+    setShowDayForm(true);
+    setForm({
+      id: session.id,
+      nombre: session.nombre || "",
+      telefono: session.telefono || "",
+      tipo: session.tipo || "Coaching espiritual",
+      fecha: session.fecha || dateTimeForDay(selectedDay),
+      motivo: session.motivo || "",
+      sala: session.sala || "",
+      notas: session.notas || "",
+      fecha_creacion: session.fecha_creacion || "",
+    });
+  }
+
+  if (isAdmin && selectedDay) {
+    return (
+      <section className="content-page sessions-page">
+        <PageTitle icon={CalendarDays} title={formatSessionDay(selectedDay)} subtitle="Turnos del día" onBack={() => setSelectedDay("")} />
+        <div className="session-list day-detail">
+          {selectedDaySessions.length === 0 ? <p className="empty-state">No hay turnos cargados para este día.</p> : null}
+          {selectedDaySessions.map((session) => (
+            <article className={`session-card ${sessionStatusClass(session)}`} key={session.id}>
+              <small>{sessionStatusLabel(session.estado)} - {formatSessionTime(session.fecha)}</small>
+              <h3>{session.nombre}</h3>
+              <p>{session.tipo || "Coaching espiritual"}</p>
+              {session.telefono ? <em>WhatsApp: {session.telefono}</em> : null}
+              {session.motivo ? <span>{summary(session.motivo, 120)}</span> : null}
+              <div className="session-actions">
+                <button className="primary small" type="button" onClick={() => setSelected(session)}>
+                  <Video size={16} /> Ver enlace
+                </button>
+                <button className="ghost compact" type="button" onClick={() => editSession(session)}>
+                  <Pencil size={15} /> Editar
+                </button>
+                <button className="ghost compact danger" type="button" onClick={() => deleteSession(session)}>
+                  <Trash2 size={15} /> Borrar
+                </button>
+              </div>
+            </article>
+          ))}
+          {!showDayForm ? (
+            <button className="primary" type="button" onClick={openDayForm}>
+              <Plus size={17} /> Cargar turno
+            </button>
+          ) : (
+          <SessionBookingForm
+            form={form}
+            setForm={setForm}
+            busy={busy}
+            isAdmin={isAdmin}
+            onSubmit={bookSession}
+            status={saveStatus}
+            submitLabel={form.id ? "Guardar cambios" : "Crear turno"}
+          />
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="content-page sessions-page">
+      <PageTitle icon={CalendarDays} title="Sesiones" subtitle="Coaching espiritual 1 a 1 dentro del Ashram." onBack={onBack} />
+      {isAdmin ? (
+        <div className="session-sync-status">
+          <span>{sessions.length} turno{sessions.length === 1 ? "" : "s"} leído{sessions.length === 1 ? "" : "s"} desde Firebase</span>
+          <small>Si este número es cero, la app no está recibiendo la agenda guardada.</small>
+        </div>
+      ) : null}
+      {!isAdmin ? (
+        <SessionBookingForm
+          form={form}
+          setForm={setForm}
+          busy={busy}
+          isAdmin={isAdmin}
+          onSubmit={bookSession}
+          status={saveStatus}
+          title="Solicitar sesión"
+          submitLabel="Enviar solicitud"
+        />
+      ) : null}
+      {isAdmin && requests.length ? <SessionRequests sessions={requests} onSchedule={scheduleSession} /> : null}
+      <SessionList title={isAdmin ? "Agenda de sesiones" : "Tu agenda de sesiones"} sessions={upcoming} onOpen={setSelected} onDayOpen={openDay} isAdmin={isAdmin} />
+      {past.length ? <SessionList title="Historial" sessions={past} onOpen={setSelected} isAdmin={isAdmin} /> : null}
+    </section>
+  );
+}
+
+function SessionBookingForm({ form, setForm, busy, isAdmin, onSubmit, status = "", title = "Cargar turno", submitLabel = "Guardar" }) {
+  return (
+    <form className="session-booking" onSubmit={onSubmit}>
+      <h2>{title}</h2>
+      <label>Nombre<input value={form.nombre} onChange={(event) => setForm({ ...form, nombre: event.target.value })} placeholder={isAdmin ? "Turno reservado" : ""} /></label>
+      <label>WhatsApp<input value={form.telefono} onChange={(event) => setForm({ ...form, telefono: event.target.value })} placeholder="+54..." /></label>
+      <label>Tipo de sesión
+        <select value={form.tipo} onChange={(event) => setForm({ ...form, tipo: event.target.value })}>
+          <option>Coaching espiritual</option>
+          <option>Ayurveda y hábitos</option>
+          <option>Acompañamiento personal</option>
+        </select>
+      </label>
+      {isAdmin ? <label>Día y horario<input type="datetime-local" value={form.fecha} onChange={(event) => setForm({ ...form, fecha: event.target.value })} /></label> : null}
+      <label>Motivo / intención<textarea value={form.motivo} onChange={(event) => setForm({ ...form, motivo: event.target.value })} placeholder="Contame brevemente qué querés trabajar..." /></label>
+      {status ? <p className="session-save-status">{status}</p> : null}
+      <button className="primary" type="button" disabled={busy} onClick={onSubmit}>{busy ? "Guardando..." : submitLabel}</button>
+    </form>
+  );
+}
+
+function SessionList({ title, sessions, onOpen, onDayOpen, isAdmin }) {
+  const groups = isAdmin ? buildAdminAgendaDays(sessions) : groupSessionsByDay(sessions);
+  if (!isAdmin) {
+    return (
+      <div className="session-list">
+        <h2>{title}</h2>
+        {sessions.length === 0 ? <p className="empty-state">Aún no hay sesiones confirmadas.</p> : null}
+        {sessions.map((session) => (
+          <article className={`session-card ${sessionStatusClass(session)}`} key={session.id}>
+            <small>{sessionStatusLabel(session.estado)} - {formatSessionDate(session.fecha)}</small>
+            <h3>{session.tipo || "Coaching espiritual"}</h3>
+            <p>{session.motivo || "Sesión privada de acompañamiento."}</p>
+            <div className="session-actions">
+              <button className="primary small" type="button" onClick={() => onOpen?.(session)}>
+                <Video size={16} /> Entrar a la videollamada
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`session-list ${isAdmin ? "session-calendar" : ""}`}>
+      <h2>{title}</h2>
+      {sessions.length === 0 ? <p className="empty-state">Aún no hay sesiones.</p> : null}
+      {groups.map(({ day, label, items }) => (
+        <button className={`session-day ${items.length ? "has-sessions" : ""}`} key={day} type="button" onClick={() => isAdmin ? onDayOpen?.(day) : null}>
+          <h3>{label}</h3>
+          {items.length === 0 ? <p className="session-empty-day">Sin turnos</p> : null}
+          {items.length ? <strong>{items.length} turno{items.length === 1 ? "" : "s"}</strong> : null}
+          {items.slice(0, 3).map((session) => (
+            <span className="session-mini-item" key={session.id}>
+              <b>{formatSessionTime(session.fecha)}</b>
+              <span>{session.nombre || "Alumno"}</span>
+              <em>{session.tipo || "Sesión"}</em>
+            </span>
+          ))}
+          {items.length > 3 ? <em className="session-more">+{items.length - 3} más</em> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SessionRequests({ sessions, onSchedule }) {
+  const [dates, setDates] = useState({});
+  return (
+    <div className="session-list session-requests">
+      <h2>Solicitudes pendientes</h2>
+      {sessions.map((session) => (
+        <article className="session-card session-request" key={session.id}>
+          <small>Solicitud nueva</small>
+          <h3>{session.nombre}</h3>
+          <p>{session.tipo || "Coaching espiritual"}</p>
+          {session.telefono ? <em>WhatsApp: {session.telefono}</em> : null}
+          {session.motivo ? <span>{summary(session.motivo, 130)}</span> : null}
+          <label className="schedule-field">
+            Asignar día y hora
+            <input
+              type="datetime-local"
+              value={dates[session.id] || ""}
+              onChange={(event) => setDates((current) => ({ ...current, [session.id]: event.target.value }))}
+            />
+          </label>
+          <button className="primary small" type="button" onClick={() => onSchedule(session, dates[session.id])}>
+            Confirmar turno
+          </button>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -691,7 +1177,9 @@ function ProductDetailModal({ product, quantity, onClose, onAdd, onChangeQuantit
     <div className="modal-backdrop">
       <section className="store-modal">
         <button className="icon-btn store-modal-close" type="button" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
-        <img src={product.imagen || "/icono_conocimiento.webp"} alt="" />
+        <div className="store-modal-image">
+          <img src={product.imagen || "/icono_conocimiento.webp"} alt="" />
+        </div>
         <div className="store-modal-body">
           <small>{product.categoria || "Ashram Ganesha"}</small>
           <h2>{productName(product)}</h2>
@@ -735,49 +1223,51 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
         {filtered.map((book) => (
           <article className="book-card" key={book.id}>
             <img src={book.portada_url || book.imagen || "/icono_biblioteca.webp"} alt="" />
-            <h3>{book.titulo}</h3>
-            <p>{book.categoria || "Sin categoria"}</p>
-            {contentAccessType(book) !== "gratis" ? <span className="access-badge">{accessLabel(book)}</span> : null}
-            {book.pdf_url || book.pdf ? (
-              <button
-                className="primary small"
-                onClick={() => {
-                  if (!canOpenPaidContent(profile, book)) {
-                    onToast?.(accessToast(book));
-                    openAccessWhatsApp(profile, "biblioteca", book);
-                    return;
-                  }
-                  setPdfViewer({ title: book.titulo || "Libro", url: book.pdf_url || book.pdf });
-                }}
-              >
-                <BookOpen size={16} /> {contentAccessType(book) === "compra" ? "Comprar" : contentAccessType(book) === "suscripcion" ? "Solicitar" : "Leer"}
+            <div>
+              <h3>{book.titulo}</h3>
+              <p>{book.categoria || "Sin categoria"}</p>
+              {contentAccessType(book) !== "gratis" ? <span className="access-badge">{accessLabel(book)}</span> : null}
+              {book.pdf_url || book.pdf ? (
+                <button
+                  className="primary small"
+                  onClick={() => {
+                    if (!canOpenPaidContent(profile, book)) {
+                      onToast?.(accessToast(book));
+                      openAccessWhatsApp(profile, "biblioteca", book);
+                      return;
+                    }
+                    setPdfViewer({ title: book.titulo || "Libro", url: book.pdf_url || book.pdf });
+                  }}
+                >
+                  <BookOpen size={16} /> {contentAccessType(book) === "compra" ? "Comprar" : contentAccessType(book) === "suscripcion" ? "Solicitar" : "Leer"}
+                </button>
+              ) : null}
+              {book.epub_url || book.epub ? (
+                <button
+                  className="primary small"
+                  type="button"
+                  onClick={() => {
+                    if (!canOpenPaidContent(profile, book)) {
+                      onToast?.(accessToast(book));
+                      openAccessWhatsApp(profile, "biblioteca", book);
+                      return;
+                    }
+                    setEpubViewer({
+                      title: book.titulo || "Libro",
+                      url: book.epub_url || book.epub,
+                      path: book.epub_path || "",
+                      chapters: book.epub_chapters || [],
+                      epubTitle: book.epub_title || "",
+                    });
+                  }}
+                >
+                  <BookOpen size={16} /> Leer EPUB
+                </button>
+              ) : null}
+              <button className="ghost compact share-content-button" type="button" onClick={() => onShare?.("biblioteca", book)}>
+                <Share2 size={15} /> Compartir
               </button>
-            ) : null}
-            {book.epub_url || book.epub ? (
-              <button
-                className="primary small"
-                type="button"
-                onClick={() => {
-                  if (!canOpenPaidContent(profile, book)) {
-                    onToast?.(accessToast(book));
-                    openAccessWhatsApp(profile, "biblioteca", book);
-                    return;
-                  }
-                  setEpubViewer({
-                    title: book.titulo || "Libro",
-                    url: book.epub_url || book.epub,
-                    path: book.epub_path || "",
-                    chapters: book.epub_chapters || [],
-                    epubTitle: book.epub_title || "",
-                  });
-                }}
-              >
-                <BookOpen size={16} /> Leer EPUB
-              </button>
-            ) : null}
-            <button className="ghost compact share-content-button" type="button" onClick={() => onShare?.("biblioteca", book)}>
-              <Share2 size={15} /> Compartir
-            </button>
+            </div>
           </article>
         ))}
       </div>
@@ -900,20 +1390,35 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
           {items.length === 0 ? <p className="empty-state">Aun no hay encuentros compartidos.</p> : null}
           {items.map((item) => {
             const stats = social[item.id] || { likes: 0, comments: 0, lastComment: "" };
+            const embed = satsangVideoEmbed(item);
+            const description = satsangDescriptionText(item.descripcion);
             return (
-              <button className="post-card" key={item.id} onClick={() => openDetail(item)}>
+              <article className="post-card" key={item.id}>
                 {item.imagen ? <img src={item.imagen} alt="" /> : null}
+                {embed ? (
+                  <div className="video-frame satsang-card-video">
+                    <iframe
+                      title={contentTitle(item)}
+                      src={embed}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                ) : null}
                 <span>
                   <strong>{contentTitle(item)}</strong>
                   <small>Satsang</small>
-                  <p>{summary(item.descripcion, 130)}</p>
+                  {description ? <p>{summary(description, 130)}</p> : null}
                   <span className="post-meta">
                     <span><Heart size={15} /> {stats.likes}</span>
                     <span><MessageCircle size={15} /> {stats.comments}</span>
                   </span>
                   {stats.lastComment ? <em>Ultima reflexion: {summary(stats.lastComment, 70)}</em> : null}
                 </span>
-              </button>
+                <button className="ghost compact" type="button" onClick={() => openDetail(item)}>
+                  Ver encuentro
+                </button>
+              </article>
             );
           })}
         </div>
@@ -993,8 +1498,10 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
 }
 
 function DetalleModulo({ modulo, titulo, coleccion, profile, showSubscribe, onBack, onToast, onSubscribe, onShare }) {
+  const [epubViewer, setEpubViewer] = useState(null);
   const embed = youtubeEmbedUrl(modulo.video);
   const itemTitle = contentTitle(modulo);
+  const epubUrl = modulo.epub_url || modulo.epub;
   return (
     <section className="content-page">
       <PageTitle icon={sectionIcon(coleccion)} iconSrc={sectionIconSrc(coleccion)} title={titulo} subtitle={sectionSubtitle(coleccion)} onBack={onBack} />
@@ -1029,12 +1536,33 @@ function DetalleModulo({ modulo, titulo, coleccion, profile, showSubscribe, onBa
             <Download size={18} /> Descargar PDF
           </a>
         ) : null}
+        {epubUrl ? (
+          <button
+            className="primary"
+            type="button"
+            onClick={() => setEpubViewer({
+              title: itemTitle || "Material",
+              url: epubUrl,
+              path: modulo.epub_path || "",
+              chapters: modulo.epub_chapters || [],
+              epubTitle: modulo.epub_title || "",
+            })}
+          >
+            <BookOpen size={18} /> Leer EPUB
+          </button>
+        ) : null}
       </article>
+      {epubViewer ? (
+        <Suspense fallback={<div className="modal-backdrop"><div className="reader-loading">Preparando lector EPUB...</div></div>}>
+          <EpubReader viewer={epubViewer} onClose={() => setEpubViewer(null)} />
+        </Suspense>
+      ) : null}
     </section>
   );
 }
 
 function CourseDetail({ coleccion, titulo, tag, modules, profile, onBack, onOpenModule, onSubscribe, onShare }) {
+  const [epubViewer, setEpubViewer] = useState(null);
   const freeModule = modules[0];
   const courseOpen = isCourseOpen(modules);
   return (
@@ -1052,6 +1580,7 @@ function CourseDetail({ coleccion, titulo, tag, modules, profile, onBack, onOpen
           {modules.map((item, index) => {
             const free = index === 0;
             const locked = !free && !courseOpen && !hasContentAccess(profile, coleccion, item, freeModule?.id);
+            const itemEpubUrl = item.epub_url || item.epub;
             return (
               <button
                 className={`course-class ${locked ? "locked" : ""}`}
@@ -1062,13 +1591,23 @@ function CourseDetail({ coleccion, titulo, tag, modules, profile, onBack, onOpen
                     onSubscribe?.();
                     return;
                   }
+                  if (itemEpubUrl) {
+                    setEpubViewer({
+                      title: contentTitle(item) || "Libro",
+                      url: itemEpubUrl,
+                      path: item.epub_path || "",
+                      chapters: item.epub_chapters || [],
+                      epubTitle: item.epub_title || "",
+                    });
+                    return;
+                  }
                   onOpenModule(item);
                 }}
               >
                 <span>{index + 1}</span>
                 <strong>{contentTitle(item)}</strong>
-                <small>{free ? "Muestra gratis" : locked ? "Suscripcion" : "Disponible"}</small>
-                {locked ? <Lock size={17} /> : <Video size={18} />}
+                <small>{locked ? "Suscripcion" : itemEpubUrl ? "Ver libro" : free ? "Muestra gratis" : "Disponible"}</small>
+                {locked ? <Lock size={17} /> : itemEpubUrl ? <BookOpen size={18} /> : <Video size={18} />}
               </button>
             );
           })}
@@ -1077,6 +1616,11 @@ function CourseDetail({ coleccion, titulo, tag, modules, profile, onBack, onOpen
           <Share2 size={15} /> Compartir
         </button>
       </article>
+      {epubViewer ? (
+        <Suspense fallback={<div className="modal-backdrop"><div className="reader-loading">Preparando lector EPUB...</div></div>}>
+          <EpubReader viewer={epubViewer} onClose={() => setEpubViewer(null)} />
+        </Suspense>
+      ) : null}
     </section>
   );
 }
@@ -1086,7 +1630,8 @@ function SatsangDetail({ item, user, profile, onBack, onShare }) {
   const [comments, setComments] = useState([]);
   const [comment, setComment] = useState("");
   const itemTitle = contentTitle(item);
-  const embed = youtubeEmbedUrl(item.video);
+  const embed = satsangVideoEmbed(item);
+  const description = satsangDescriptionText(item.descripcion);
 
   useEffect(() => {
     refreshSocial();
@@ -1146,7 +1691,7 @@ function SatsangDetail({ item, user, profile, onBack, onShare }) {
             />
           </div>
         ) : null}
-        <p>{item.descripcion}</p>
+        {description ? <p>{description}</p> : null}
         <button className="ghost compact share-content-button" type="button" onClick={onShare}>
           <Share2 size={15} /> Compartir
         </button>
@@ -1229,18 +1774,27 @@ function Meditaciones({ user, profile, onBack, onToast, onShare }) {
   return (
     <section className="content-page">
       <PageTitle icon={Headphones} iconSrc="/icono_meditacion.webp" title="Meditacion" subtitle={sectionSubtitle("meditaciones")} onBack={onBack} />
-      <div className="list">
+      <div className="book-grid">
         {items.length === 0 ? <p className="empty-state">Aun no hay meditaciones disponibles.</p> : null}
         {items.map((item) => (
-          <button className="row-card" key={item.id} onClick={() => openMeditation(item)}>
+          <article className="book-card meditation-card" key={item.id}>
             <img src={item.imagen || "/icono_meditacion.webp"} alt="" />
-            <span>
-              <strong>{item.titulo || "Sin titulo"}</strong>
-              <small>{item.descripcion || "Meditacion guiada"}</small>
-              {contentAccessType(item) !== "gratis" ? <small className="row-meta"><span>{accessLabel(item)}</span></small> : null}
-            </span>
-            {favorites[item.id] ? <Heart className="favorite-mark" size={20} /> : <Headphones size={22} />}
-          </button>
+            <div>
+              <h3>{item.titulo || "Sin titulo"}</h3>
+              <p>{item.descripcion || "Meditacion guiada"}</p>
+              {contentAccessType(item) !== "gratis" ? <span className="access-badge">{accessLabel(item)}</span> : null}
+              <button className="primary small" type="button" onClick={() => openMeditation(item)}>
+                <Headphones size={16} /> Escuchar
+              </button>
+              <button className="ghost compact share-content-button" type="button" onClick={() => toggleFavorite(item)}>
+                <Heart className={favorites[item.id] ? "favorite-mark" : ""} size={15} />
+                {favorites[item.id] ? "Favorita" : "Favorito"}
+              </button>
+              <button className="ghost compact share-content-button" type="button" onClick={() => onShare?.("meditaciones", item)}>
+                <Share2 size={15} /> Compartir
+              </button>
+            </div>
+          </article>
         ))}
       </div>
     </section>
@@ -1653,37 +2207,34 @@ function ChatThread({ user, profile, threadId, isAdmin, onBack }) {
   );
 }
 
-function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onBack }) {
+function Admin({ profile, menuConfig, onToast, onBack }) {
   const [section, setSection] = useState("biblioteca");
   const [items, setItems] = useState([]);
   const [editing, setEditing] = useState(null);
   const [shareDraft, setShareDraft] = useState(null);
+  const dataPath = adminDataPath(section);
 
   useEffect(() => {
-    if (section === "cuaderno" || section === "libros") {
+    if (section === "cuaderno" || section === "libros" || section === "configuracion") {
       setItems([]);
       return;
     }
-    loadList(section).then(setItems);
+    loadList(dataPath).then(setItems);
   }, [section]);
 
-  useEffect(() => {
-    if (!quickNoteRequest) return;
-    setSection("cuaderno");
-    setEditing(null);
-  }, [quickNoteRequest]);
-
   async function refresh() {
-    setItems(await loadList(section));
+    if (section === "cuaderno" || section === "libros" || section === "configuracion") return;
+    setItems(await loadList(dataPath));
   }
 
   async function deleteItem(item) {
-    if (!window.confirm(`Borrar "${contentTitle(item) || "item"}"?`)) return;
-    await remove(ref(db, `${section}/${item.id}`));
+    const label = section === "tienda" ? productName(item) : contentTitle(item);
+    if (!window.confirm(`Borrar "${label || "item"}"?`)) return;
+    await remove(ref(db, `${dataPath}/${item.id}`));
     await deleteStoragePath(item.portada_path || item.imagen_path);
     await deleteStoragePath(item.pdf_path);
     await deleteStoragePath(item.epub_path);
-    onToast("Contenido borrado.");
+    onToast(section === "tienda" ? "Producto borrado." : "Contenido borrado.");
     refresh();
   }
 
@@ -1697,7 +2248,7 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
           </button>
         ))}
       </div>
-      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" ? (
+      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" ? (
         <button className="primary" onClick={() => setEditing({})}>
           <Plus size={18} /> Nuevo
         </button>
@@ -1714,7 +2265,7 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
           onToast={onToast}
         />
       ) : null}
-      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "tienda" && (
+      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "tienda" && (
         <AdminForm
           key={`${section}-${editing.id || "new"}`}
           section={section}
@@ -1730,38 +2281,110 @@ function Admin({ profile, quickNoteRequest = 0, onQuickNoteHandled, onToast, onB
           onToast={onToast}
         />
       )}
-      {section === "cuaderno" ? (
+      {section === "configuracion" ? (
+        <MenuSettingsAdmin menuConfig={menuConfig} onToast={onToast} />
+      ) : section === "cuaderno" ? (
         <CuadernoAshram
           profile={profile}
-          quickNoteRequest={quickNoteRequest}
-          onQuickNoteHandled={onQuickNoteHandled}
           onToast={onToast}
+          onBackToAdminPanel={() => setSection("biblioteca")}
           onShared={(target, note) => {
             const draft = createShareDraft(noteTargetToSection(target), note);
             if (draft) setShareDraft(draft);
           }}
         />
       ) : section === "libros" ? (
-        <BookStudio profile={profile} onToast={onToast} />
+        <BookStudio
+          profile={profile}
+          onToast={onToast}
+          onPublishToLibrary={(target, draft) => {
+            setSection(target === "biblioteca" ? "biblioteca" : "conocimiento");
+            setEditing(draft);
+          }}
+        />
       ) : section === "usuarios" ? (
         <UserManagement users={items} onToast={onToast} onRefresh={refresh} />
       ) : (
-        <div className="list">
+        <div className={`list ${section === "tienda" ? "admin-products-list" : ""}`}>
+          {section === "tienda" ? (
+            <header className="admin-list-head">
+              <strong>Productos cargados</strong>
+              <small>{items.length} producto{items.length === 1 ? "" : "s"} en la tienda</small>
+            </header>
+          ) : null}
+          {items.length === 0 ? (
+            <p className="empty-state">
+              {section === "tienda" ? "Todavía no hay productos cargados." : "Todavía no hay contenidos cargados."}
+            </p>
+          ) : null}
           {items.map((item) => (
-            <article className="admin-row" key={item.id}>
+            <article className={`admin-row ${section === "tienda" ? "admin-product-row" : ""}`} key={item.id}>
               <img src={item.portada_url || item.imagen || sectionFallbackImage(section)} alt="" />
               <span>
                 <strong>{section === "tienda" ? productName(item) : contentTitle(item)}</strong>
-                <small>{section === "tienda" ? `${formatMoney(productPrice(item))} - Stock: ${item.stock ?? 0}` : section === "satsang" ? "Satsang" : item.categoria || item.etiqueta || "Sin categoria"}</small>
+                <small>{section === "tienda" ? `${formatMoney(productPrice(item))} - Stock: ${item.stock ?? 0} - ${item.activo === false ? "Oculto" : "Visible"}` : section === "satsang" ? "Satsang" : item.categoria || item.etiqueta || "Sin categoria"}</small>
+                {section === "tienda" && item.categoria ? <em>{item.categoria}</em> : null}
               </span>
-              <button className="icon-btn" onClick={() => setEditing(item)}><Pencil size={18} /></button>
-              <button className="icon-btn danger" onClick={() => deleteItem(item)}><Trash2 size={18} /></button>
+              <button className="icon-btn" type="button" title="Editar" onClick={() => setEditing(item)}><Pencil size={18} /></button>
+              <button className="icon-btn danger" type="button" title="Borrar" onClick={() => deleteItem(item)}><Trash2 size={18} /></button>
             </article>
           ))}
         </div>
       )}
       {shareDraft ? <SharePromoModal draft={shareDraft} onClose={() => setShareDraft(null)} onToast={onToast} /> : null}
     </section>
+  );
+}
+
+function MenuSettingsAdmin({ menuConfig, onToast }) {
+  const [savingId, setSavingId] = useState("");
+
+  async function toggleSection(id) {
+    const nextEnabled = !isMainMenuEnabled(menuConfig, id);
+    setSavingId(id);
+    try {
+      await set(ref(db, `${MAIN_MENU_CONFIG_PATH}/${id}`), nextEnabled);
+      onToast(nextEnabled ? "Boton habilitado." : "Boton deshabilitado.");
+    } catch (error) {
+      onToast(`No pude guardar la configuracion: ${error.message}`);
+    } finally {
+      setSavingId("");
+    }
+  }
+
+  return (
+    <div className="menu-settings">
+      <header className="admin-list-head">
+        <strong>Menu principal</strong>
+        <small>Activa o desactiva los botones grandes del inicio y sus accesos inferiores.</small>
+      </header>
+      <div className="menu-settings-list">
+        {sections.map(({ id, label, phrase, icon: Icon, iconSrc }) => {
+          const enabled = isMainMenuEnabled(menuConfig, id);
+          const saving = savingId === id;
+          return (
+            <article className="menu-setting-row" key={id}>
+              <span className="menu-setting-icon">
+                {iconSrc ? <img src={iconSrc} alt="" /> : <Icon size={22} />}
+              </span>
+              <span>
+                <strong>{label}</strong>
+                <small>{phrase}</small>
+              </span>
+              <button
+                className={`toggle-btn ${enabled ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleSection(id)}
+                disabled={saving}
+                aria-pressed={enabled}
+              >
+                <span>{enabled ? "Activo" : "Inactivo"}</span>
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -2080,8 +2703,13 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
   const isMeditation = section === "meditaciones";
   const isSatsang = section === "satsang";
   const isCourseSection = ["conocimiento", "ejercicios"].includes(section);
+  const isKnowledge = section === "conocimiento";
   const hasAccessMode = isBook || isMeditation;
   const includePdf = isBook || section === "conocimiento";
+  const includeEpub = isBook || section === "conocimiento";
+  const existingPdfUrl = item.pdf_url || item.pdf || "";
+  const existingEpubUrl = item.epub_url || item.epub || "";
+  const existingEpubLabel = item.epub_file_name || item.epub_title || (existingEpubUrl ? "EPUB ya generado" : "");
   const [form, setForm] = useState({
     titulo: item.tema || item.titulo || "",
     descripcion: item.descripcion || "",
@@ -2116,13 +2744,13 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
 
   async function save(event) {
     event.preventDefault();
-    if (!cleanText(form.titulo)) return onToast(isSatsang ? "Completa el tema." : "Completa el titulo.");
-    if (!isBanner && !isMeditation && !isSatsang && !cleanText(form.categoria)) return onToast(isBook ? "Completa la categoria." : "Completa la etiqueta.");
+    if (!isKnowledge && !cleanText(form.titulo)) return onToast(isSatsang ? "Completa el tema." : "Completa el titulo.");
+    if (!isKnowledge && !isBanner && !isMeditation && !isSatsang && !cleanText(form.categoria)) return onToast(isBook ? "Completa la categoria." : "Completa la etiqueta.");
     if (isBanner && !cleanText(form.blog_id)) return onToast("Selecciona el post del blog.");
     const existingAudio = item.audio_url || item.link_audio || item.audio || item.link_drive;
     if (isMeditation && !audioFile && !cleanText(form.link_drive) && !existingAudio) return onToast("Subi el audio M4A o completa el link de Google Drive.");
-    if (!isSatsang && !image && !(item.portada_url || item.imagen)) return onToast("Selecciona una imagen.");
-    if (includePdf && !pdf && !epub && !(item.pdf_url || item.pdf || item.epub_url || item.epub)) return onToast(isBook ? "Selecciona un PDF o EPUB." : "Selecciona un PDF.");
+    if (!isKnowledge && !isSatsang && !image && !(item.portada_url || item.imagen)) return onToast("Selecciona una imagen.");
+    if (!isKnowledge && includePdf && !pdf && !epub && !(item.pdf_url || item.pdf || item.epub_url || item.epub)) return onToast(isBook ? "Selecciona un PDF o EPUB." : "Selecciona un PDF.");
 
     setBusy(true);
     try {
@@ -2209,19 +2837,21 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
         }
       }
 
-      if (isBook) {
+      if (includeEpub) {
         if (epub) {
           const parsedEpub = await parseEpubBuffer(await epub.arrayBuffer());
-          const uploaded = await uploadEpub(epub, "biblioteca/epubs");
+          const uploaded = await uploadEpub(epub, isBook ? "biblioteca/epubs" : `contenidos/${section}/epubs`);
           data.epub = uploaded.url;
           data.epub_url = uploaded.url;
           data.epub_path = uploaded.path;
+          data.epub_file_name = epub.name;
           data.epub_title = parsedEpub.title || cleanText(form.titulo);
           data.epub_chapters = parsedEpub.chapters;
         } else {
           data.epub = item.epub || item.epub_url || "";
           data.epub_url = item.epub_url || item.epub || "";
           data.epub_path = item.epub_path || "";
+          data.epub_file_name = item.epub_file_name || "";
           data.epub_title = item.epub_title || "";
           data.epub_chapters = item.epub_chapters || [];
         }
@@ -2287,8 +2917,8 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
       {!isBook && !isBlog && !isBanner && !isMeditation ? <label>Link video YouTube<input value={form.video} onChange={(e) => setField("video", e.target.value)} /></label> : null}
       {!isSatsang ? <FileInput icon={ImageIcon} label="Imagen" file={image} accept="image/jpeg,image/png,image/webp" onChange={setImage} /> : null}
       {isMeditation ? <FileInput icon={Upload} label="Audio M4A" file={audioFile} accept="audio/mp4,audio/x-m4a,.m4a" onChange={setAudioFile} /> : null}
-      {includePdf ? <FileInput icon={Upload} label="PDF" file={pdf} accept="application/pdf" onChange={setPdf} /> : null}
-      {isBook ? <FileInput icon={Upload} label="EPUB" file={epub} accept="application/epub+zip,.epub" onChange={setEpub} /> : null}
+      {includePdf ? <FileInput icon={Upload} label="PDF" file={pdf} existingLabel={existingPdfUrl ? "PDF ya cargado" : ""} existingUrl={existingPdfUrl} accept="application/pdf" onChange={setPdf} /> : null}
+      {includeEpub ? <FileInput icon={Upload} label="EPUB" file={epub} existingLabel={existingEpubLabel} existingUrl={existingEpubUrl} accept="application/epub+zip,.epub" onChange={setEpub} /> : null}
       <button className="primary" disabled={busy}>{busy ? "Subiendo..." : "Guardar"}</button>
     </form>
   );
@@ -2394,7 +3024,7 @@ function EnVivo({ user, profile, onBack, onToast }) {
       <PageTitle icon={Video} title="En Vivo" subtitle="Satsang, practica y comunidad en tiempo real." onBack={onBack} />
       <div className="live-status-card">
         <span className={`live-pill ${isLive ? "active" : ""}`}>{isLive ? "En vivo ahora" : "Próximo satsang"}</span>
-        <strong>{isLive ? liveConfig.titulo || "Transmision en vivo" : liveConfig.proximoTexto || "Próximo satsang"}</strong>
+        <strong>{isLive ? liveConfig.titulo || "Transmisión en vivo" : liveConfig.proximoTexto || "Próximo satsang"}</strong>
         <small>{isLive ? "Podes mirar la transmision y compartir en el chat comunitario." : "Todavia no hay transmision activa. El chat queda disponible para la comunidad."}</small>
       </div>
 
@@ -2571,11 +3201,12 @@ function ProductAdminForm({ item, onCancel, onSaved, onToast }) {
   );
 }
 
-function FileInput({ icon: Icon, label, accept, file, onChange }) {
+function FileInput({ icon: Icon, label, accept, file, existingLabel = "", existingUrl = "", onChange }) {
   return (
     <label className="file-field">
       <Icon size={18} />
-      <span>{file ? file.name : `Seleccionar ${label}`}</span>
+      <span>{file ? file.name : existingLabel ? `${label} cargado: ${existingLabel}` : `Seleccionar ${label}`}</span>
+      {existingUrl && !file ? <a href={existingUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Abrir</a> : null}
       <input type="file" accept={accept} onChange={(e) => onChange(e.target.files?.[0] || null)} />
     </label>
   );
@@ -2729,6 +3360,28 @@ function contentTitle(item) {
 
 function sectionConfig(id) {
   return sections.find((section) => section.id === id) || adminSections.find((section) => section.id === id);
+}
+
+function defaultMainMenuConfig() {
+  return Object.fromEntries(sections.map((section) => [section.id, section.id !== "ejercicios"]));
+}
+
+function normalizeMainMenuConfig(value) {
+  const defaults = defaultMainMenuConfig();
+  if (!value || typeof value !== "object") return defaults;
+  return Object.fromEntries(sections.map((section) => [section.id, value[section.id] ?? defaults[section.id]]));
+}
+
+function isMainMenuSection(id) {
+  return sections.some((section) => section.id === id);
+}
+
+function isMainMenuEnabled(menuConfig, id) {
+  return normalizeMainMenuConfig(menuConfig)[id] !== false;
+}
+
+function adminDataPath(section) {
+  return section === "tienda" ? "productos" : section;
 }
 
 function sectionIcon(id) {
@@ -2945,6 +3598,291 @@ function summary(text, limit) {
   return `${clean.slice(0, limit).trim()}...`;
 }
 
+function satsangVideoEmbed(item) {
+  const source = [
+    item?.video,
+    item?.link_video_original,
+    item?.videoUrl,
+    item?.descripcion,
+  ].map(extractYoutubeUrl).find(Boolean);
+  return source ? youtubeEmbedUrl(source) : "";
+}
+
+function extractYoutubeUrl(value) {
+  const text = String(value || "");
+  const hrefMatch = text.match(/href=["']([^"']*(?:youtube\.com|youtu\.be)[^"']*)["']/i);
+  const urlMatch = text.match(/https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s<>"')]+/i);
+  const url = hrefMatch?.[1] || urlMatch?.[0] || "";
+  return url.replace(/&amp;/g, "&").replace(/[.,;!?]+$/, "");
+}
+
+function satsangDescriptionText(value) {
+  return String(value || "")
+    .replace(/<a\b[^>]*href=["'][^"']*(?:youtube\.com|youtu\.be)[^"']*["'][^>]*>.*?<\/a>/gi, "")
+    .replace(/https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s<>"')]+/gi, "")
+    .replace(/<\/p>\s*<p>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n\s+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function defaultSessionDateTime() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(18, 0, 0, 0);
+  return toDateTimeInputValue(date);
+}
+
+function toDateTimeInputValue(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function dateTimeForDay(day) {
+  if (!day || day === "sin-fecha") return defaultSessionDateTime();
+  return `${day}T18:00`;
+}
+
+function sessionRoomName(uid, fecha) {
+  return `ashram-sesion-${firebaseKey(uid || "alumno")}-${firebaseKey(fecha || Date.now())}`;
+}
+
+function jitsiRoomUrl(roomName) {
+  const room = encodeURIComponent(roomName || `ashram-sesion-${Date.now()}`);
+  return `https://meet.jit.si/${room}#config.prejoinPageEnabled=false&config.disableDeepLinking=true&interfaceConfig.SHOW_JITSI_WATERMARK=false`;
+}
+
+function formatSessionDate(value) {
+  if (!value) return "Horario a confirmar";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("es-AR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatSessionDay(value) {
+  if (!value) return "Sin fecha";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)))
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("es-AR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  });
+}
+
+function formatSessionTime(value) {
+  if (!value) return "Horario a confirmar";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function sessionDayKey(value) {
+  if (!value) return "sin-fecha";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return toDateTimeInputValue(date).split("T")[0];
+}
+
+function groupSessionsByDay(sessions) {
+  const groups = new Map();
+  sessions.forEach((session) => {
+    const day = sessionDayKey(session.fecha);
+    if (!groups.has(day)) {
+      groups.set(day, { day, label: formatSessionDay(session.fecha), items: [] });
+    }
+    groups.get(day).items.push(session);
+  });
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    items: group.items.sort((a, b) => (a.fecha || "").localeCompare(b.fecha || "")),
+  }));
+}
+
+function upsertById(items, nextItem) {
+  if (!nextItem?.id) return items;
+  const exists = items.some((item) => item.id === nextItem.id);
+  if (!exists) return [...items, nextItem];
+  return items.map((item) => item.id === nextItem.id ? { ...item, ...nextItem } : item);
+}
+
+function sortSessionsByDate(sessions) {
+  return [...sessions].sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
+}
+
+async function saveSessionWithFallback(sessionData) {
+  try {
+    return await createSessionByRest(sessionData);
+  } catch (restError) {
+    try {
+      const sessionRef = push(ref(db, "sesiones"));
+      await set(sessionRef, sessionData);
+      return { id: sessionRef.key, ...sessionData };
+    } catch (sdkError) {
+      throw new Error(`REST: ${restError.message || restError}. SDK: ${sdkError.message || sdkError}`);
+    }
+  }
+}
+
+async function fetchSessionsByRest() {
+  const baseUrl = firebaseConfig.databaseURL?.replace(/\/$/, "");
+  if (!baseUrl) throw new Error("No está configurada la base de datos.");
+  const response = await fetch(`${baseUrl}/sesiones.json?ts=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `REST ${response.status}`);
+  }
+  const value = await response.json();
+  return Object.entries(value || {})
+    .map(([id, item]) => ({ id, ...item }))
+    .sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
+}
+
+async function updateExistingSessionWithFallback(sessionId, sessionData) {
+  await updateSessionWithFallback(sessionId, sessionData);
+  return { id: sessionId, ...sessionData };
+}
+
+async function createSessionByRest(sessionData) {
+  const baseUrl = firebaseConfig.databaseURL?.replace(/\/$/, "");
+  if (!baseUrl) throw new Error("No está configurada la base de datos.");
+  const response = await fetch(`${baseUrl}/sesiones.json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(sessionData),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `REST ${response.status}`);
+  }
+  const data = await response.json();
+  if (!data?.name) throw new Error("Firebase no devolvió el id del turno.");
+  return { id: data.name, ...sessionData };
+}
+
+async function updateSessionWithFallback(sessionId, changes) {
+  try {
+    await updateSessionByRest(sessionId, changes);
+  } catch (restError) {
+    try {
+      await update(ref(db, `sesiones/${sessionId}`), changes);
+    } catch (sdkError) {
+      throw new Error(`REST: ${restError.message || restError}. SDK: ${sdkError.message || sdkError}`);
+    }
+  }
+}
+
+async function updateSessionByRest(sessionId, changes) {
+  const baseUrl = firebaseConfig.databaseURL?.replace(/\/$/, "");
+  if (!baseUrl || !sessionId) throw new Error("No está configurada la base de datos.");
+  const response = await fetch(`${baseUrl}/sesiones/${encodeURIComponent(sessionId)}.json`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `REST ${response.status}`);
+  }
+  return response.json();
+}
+
+async function deleteSessionWithFallback(sessionId) {
+  try {
+    await deleteSessionByRest(sessionId);
+  } catch (restError) {
+    try {
+      await remove(ref(db, `sesiones/${sessionId}`));
+    } catch (sdkError) {
+      throw new Error(`REST: ${restError.message || restError}. SDK: ${sdkError.message || sdkError}`);
+    }
+  }
+}
+
+async function deleteSessionByRest(sessionId) {
+  const baseUrl = firebaseConfig.databaseURL?.replace(/\/$/, "");
+  if (!baseUrl || !sessionId) throw new Error("No está configurada la base de datos.");
+  const response = await fetch(`${baseUrl}/sesiones/${encodeURIComponent(sessionId)}.json`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `REST ${response.status}`);
+  }
+  return true;
+}
+
+function buildAdminAgendaDays(sessions) {
+  const days = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let index = 0; index < 14; index += 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const day = sessionDayKey(date.toISOString());
+    days.push({ day, label: formatSessionDay(date.toISOString()), items: [] });
+  }
+
+  const byDay = new Map(days.map((day) => [day.day, day]));
+  sessions.forEach((session) => {
+    const day = sessionDayKey(session.fecha);
+    if (!byDay.has(day)) {
+      byDay.set(day, { day, label: formatSessionDay(session.fecha), items: [] });
+    }
+    byDay.get(day).items.push(session);
+  });
+
+  return Array.from(byDay.values())
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => (a.fecha || "").localeCompare(b.fecha || "")),
+    }));
+}
+
+function sessionStatusClass(session) {
+  if (session.estado === "solicitado") return "session-request";
+  if (session.estado === "finalizada") return "session-done";
+  if (session.estado === "en curso") return "session-live";
+  if (isSessionSoon(session.fecha)) return "session-now";
+  return "session-booked";
+}
+
+function sessionStatusLabel(value) {
+  const labels = {
+    solicitado: "Solicitado",
+    reservado: "Reservado",
+    "en curso": "En curso",
+    finalizada: "Finalizada",
+    cancelada: "Cancelada",
+  };
+  return labels[value] || "Reservado";
+}
+
+function isSessionSoon(value) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return Math.abs(date.getTime() - Date.now()) <= 1000 * 60 * 20;
+}
+
 function formatDate(value) {
   if (!value) return "Sin fecha";
   const date = new Date(value);
@@ -3155,7 +4093,12 @@ async function loadList(path) {
   const value = snap.val() || {};
   return Object.entries(value)
     .map(([id, item]) => ({ id, ...item }))
-    .sort((a, b) => (a.titulo || "").localeCompare(b.titulo || ""));
+    .sort((a, b) => adminSortTitle(a, path).localeCompare(adminSortTitle(b, path)));
+}
+
+function adminSortTitle(item, path) {
+  if (path === "productos" || path === "tienda") return productName(item);
+  return contentTitle(item);
 }
 
 async function loadChatThreads() {

@@ -1,0 +1,11 @@
+{
+  "appId": "com.ashram.editor",
+  "appName": "Editor Ashram",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

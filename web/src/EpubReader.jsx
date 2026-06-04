@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, List, Moon, Sun, Type, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, Moon, Printer, Sun, Type, X } from "lucide-react";
 import { getBlob, ref as storageRef } from "firebase/storage";
 import { useEffect, useMemo, useState } from "react";
 import { storage } from "./firebase";
@@ -25,7 +25,7 @@ export default function EpubReader({ viewer, onClose }) {
     async function openBook() {
       try {
         if (viewer.chapters?.length) {
-          const parsed = { title: viewer.epubTitle || viewer.title || "", chapters: viewer.chapters };
+          const parsed = { title: viewer.epubTitle || viewer.title || "", chapters: normalizeViewerChapters(viewer.chapters) };
           const savedIndex = Number(localStorage.getItem(storageKey));
           const initialIndex = Number.isFinite(savedIndex) ? Math.min(parsed.chapters.length - 1, Math.max(0, savedIndex)) : 0;
           setBook(parsed);
@@ -79,6 +79,10 @@ export default function EpubReader({ viewer, onClose }) {
     setFontSize((current) => Math.min(150, Math.max(80, current + delta)));
   }
 
+  function printCurrentChapter() {
+    window.requestAnimationFrame(() => window.print());
+  }
+
   return (
     <div className="modal-backdrop epub-backdrop">
       <div className={`epub-modal epub-theme-${theme}`}>
@@ -105,6 +109,9 @@ export default function EpubReader({ viewer, onClose }) {
           <button className={theme === "claro" ? "active" : ""} type="button" onClick={() => setTheme("claro")} title="Claro"><Sun size={15} /></button>
           <button className={theme === "sepia" ? "active" : ""} type="button" onClick={() => setTheme("sepia")} title="Sepia">S</button>
           <button className={theme === "oscuro" ? "active" : ""} type="button" onClick={() => setTheme("oscuro")} title="Oscuro"><Moon size={15} /></button>
+          <button type="button" onClick={printCurrentChapter} title="Imprimir capitulo" disabled={!currentChapter}>
+            <Printer size={15} /> Imprimir
+          </button>
         </div>
 
         <div className="epub-reader-body">
@@ -196,4 +203,56 @@ async function fetchWithTimeout(url, ms) {
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+function normalizeViewerChapters(chapters = []) {
+  return chapters.map((chapter, index) => ({
+    href: chapter.href || `chapter-${index + 1}`,
+    title: chapter.title || chapter.titulo || `Capitulo ${index + 1}`,
+    html: chapter.html || markdownToHtml(chapter.content || chapter.contenidoMarkdown || chapter.texto || ""),
+  }));
+}
+
+function markdownToHtml(markdown = "") {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const html = [];
+  let list = [];
+
+  function flushList() {
+    if (!list.length) return;
+    html.push(`<ul>${list.map((item) => `<li>${inlineMarkdownToHtml(item)}</li>`).join("")}</ul>`);
+    list = [];
+  }
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList();
+      return;
+    }
+    if (line.startsWith("- ")) {
+      list.push(line.slice(2));
+      return;
+    }
+    flushList();
+    if (line.startsWith("### ")) html.push(`<h3>${inlineMarkdownToHtml(line.slice(4))}</h3>`);
+    else if (line.startsWith("## ")) html.push(`<h2>${inlineMarkdownToHtml(line.slice(3))}</h2>`);
+    else if (line.startsWith("# ")) html.push(`<h1>${inlineMarkdownToHtml(line.slice(2))}</h1>`);
+    else if (line.startsWith("> ")) html.push(`<blockquote>${inlineMarkdownToHtml(line.slice(2))}</blockquote>`);
+    else html.push(`<p>${inlineMarkdownToHtml(line)}</p>`);
+  });
+  flushList();
+  return html.join("\n") || "<p>Capitulo sin contenido guardado.</p>";
+}
+
+function inlineMarkdownToHtml(text = "") {
+  return escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

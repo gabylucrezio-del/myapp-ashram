@@ -11,6 +11,14 @@
 - APK debug: `teleprompter-apk/app/build/outputs/apk/debug/app-debug.apk`.
 - Uso: teleprompter flotante sobre la camara del celular.
 
+## Estudio Ashram
+- Tipo: App web local, empaquetada como APK.
+- Carpeta web local: `estudio-ashram/`.
+- Carpeta APK: `estudio-ashram-apk/`.
+- Uso: organizador local de carpetas, archivos, apuntes, guiones y libros.
+- Datos: guarda localmente en el dispositivo/navegador.
+- Nota: esta es la app que debe unirse con el teleprompter para trabajar con archivos locales.
+
 ## Registro Terapeutico Ashram Ganesha
 - Tipo: App web movil, preparada para empaquetar como APK.
 - Carpeta: `registro-terapeutico/`.

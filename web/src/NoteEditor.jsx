@@ -34,7 +34,7 @@ export default function NoteEditor({ note, folders, notes = [], defaultFolderId 
       editorRef.current.innerHTML = markdownToHtml(nextForm.contenidoMarkdown);
     }
     setShowSlash(false);
-  }, [note?.id, defaultFolderId]);
+  }, [note?.id, note?.actualizadoEn, note?.contenidoMarkdown, defaultFolderId]);
 
   function setField(key, value) {
     setForm((current) => ({ ...current, [key]: value }));

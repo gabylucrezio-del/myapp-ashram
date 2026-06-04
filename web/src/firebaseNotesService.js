@@ -28,6 +28,55 @@ export function listenPrivateNotes(callback) {
   });
 }
 
+export async function loadNotebookWorkspace() {
+  const workspaceSnap = await get(ref(db, "noteWorkspace"));
+  const workspace = workspaceSnap.val();
+  if (workspace?.folders || workspace?.notes) {
+    return {
+      folders: Object.entries(workspace.folders || {})
+        .map(([id, folder]) => ({ id, ...folder }))
+        .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")),
+      notes: Object.entries(workspace.notes || {})
+        .map(([id, note]) => ({ id, ...note }))
+        .sort((a, b) => (b.actualizadoEn || b.creadoEn || "").localeCompare(a.actualizadoEn || a.creadoEn || "")),
+      syncedAt: workspace.syncedAt || "",
+    };
+  }
+
+  const [foldersSnap, notesSnap] = await Promise.all([
+    get(ref(db, "noteFolders")),
+    get(ref(db, "privateNotes")),
+  ]);
+  const folders = foldersSnap.val() || {};
+  const notes = notesSnap.val() || {};
+  return {
+    folders: Object.entries(folders)
+      .map(([id, folder]) => ({ id, ...folder }))
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")),
+    notes: Object.entries(notes)
+      .map(([id, note]) => ({ id, ...note }))
+      .sort((a, b) => (b.actualizadoEn || b.creadoEn || "").localeCompare(a.actualizadoEn || a.creadoEn || "")),
+    syncedAt: "",
+  };
+}
+
+export async function uploadNotebookWorkspace({ folders = [], notes = [] }) {
+  const syncedAt = new Date().toISOString();
+  const folderMap = Object.fromEntries(
+    folders.map(({ id, ...folder }) => [id, { ...folder, actualizadoEn: folder.actualizadoEn || syncedAt }]),
+  );
+  const noteMap = Object.fromEntries(
+    notes.map(({ id, ...note }) => [id, { ...note, actualizadoEn: note.actualizadoEn || syncedAt }]),
+  );
+  await set(ref(db, "noteWorkspace"), {
+    schema: "ashram-notebook-v1",
+    syncedAt,
+    folders: folderMap,
+    notes: noteMap,
+  });
+  return syncedAt;
+}
+
 export async function saveFolder(folder) {
   const now = new Date().toISOString();
   const data = {
@@ -198,11 +247,12 @@ export async function saveBookChapter(bookId, chapter) {
   };
   if (chapter.id) {
     await update(ref(db, `bookChapters/${bookId}/${chapter.id}`), data);
-    return chapter.id;
+    return { id: chapter.id, bookId, ...chapter, ...data };
   }
   const chapterRef = push(ref(db, `bookChapters/${bookId}`));
-  await set(chapterRef, { ...data, creadoEn: now });
-  return chapterRef.key;
+  const newChapter = { ...data, creadoEn: now };
+  await set(chapterRef, newChapter);
+  return { id: chapterRef.key, bookId, ...newChapter };
 }
 
 export async function deleteBookChapter(bookId, chapterId) {

@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agenda de turnos - Ashram Ganesha</title>
+    <style>
+      :root {
+        --ink: #2f2a1f;
+        --violet: #4a324c;
+        --gold: #d9bd79;
+        --paper: #fffdf8;
+        --mist: #fff8e7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(rgba(255, 248, 231, 0.78), rgba(255, 253, 248, 0.94)), url("/fondo_app.webp") center / cover fixed;
+        color: var(--ink);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        width: min(980px, calc(100vw - 20px));
+        margin: 0 auto;
+        padding: 18px 0 40px;
+      }
+      header, .panel, .day, form {
+        border: 1px solid rgba(217, 189, 121, 0.92);
+        border-radius: 14px;
+        background: rgba(255, 253, 248, 0.96);
+        box-shadow: 0 12px 28px rgba(61, 45, 20, 0.13);
+      }
+      header {
+        display: grid;
+        gap: 5px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3, p { margin: 0; }
+      h1, h2, h3 {
+        color: var(--violet);
+        font-family: Georgia, "Times New Roman", serif;
+      }
+      header small, .status, .empty, .item small {
+        color: #746a4a;
+        font-size: 12px;
+      }
+      .panel {
+        display: grid;
+        gap: 12px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      .calendar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 8px;
+      }
+      .day {
+        min-height: 118px;
+        padding: 8px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .day.active, .day.has {
+        border-color: rgba(155, 107, 112, 0.95);
+        background: linear-gradient(145deg, #fffdf8, #fff1e2);
+      }
+      .day h3 {
+        font-size: 13px;
+        text-transform: capitalize;
+      }
+      .item {
+        display: grid;
+        gap: 1px;
+        margin-top: 5px;
+        border-left: 3px solid rgba(155, 107, 112, 0.75);
+        border-radius: 7px;
+        padding: 5px;
+        background: var(--paper);
+        font-size: 11px;
+      }
+      .item b { color: var(--violet); }
+      .selected-panel {
+        scroll-margin-top: 10px;
+      }
+      #selectedList {
+        display: grid;
+        gap: 8px;
+      }
+      .selected-item {
+        display: grid;
+        gap: 4px;
+        border: 1px solid rgba(216, 199, 160, 0.82);
+        border-left: 4px solid rgba(155, 107, 112, 0.86);
+        border-radius: 10px;
+        padding: 9px;
+        background: var(--paper);
+      }
+      .selected-item b {
+        color: var(--violet);
+      }
+      .selected-item span,
+      .selected-item p,
+      .selected-item small {
+        margin: 0;
+        color: #5e5a2e;
+        font-size: 12px;
+      }
+      .selected-item a {
+        justify-self: start;
+        border-radius: 999px;
+        padding: 7px 10px;
+        background: var(--violet);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        text-decoration: none;
+      }
+      form {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+      }
+      label {
+        display: grid;
+        gap: 5px;
+        color: #5e5a2e;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid rgba(216, 199, 160, 0.95);
+        border-radius: 10px;
+        padding: 11px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+      }
+      textarea {
+        min-height: 82px;
+        resize: vertical;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 14px;
+        background: var(--violet);
+        color: #fff;
+        font-weight: 800;
+      }
+      button.secondary {
+        border: 1px solid rgba(217, 189, 121, 0.92);
+        background: var(--mist);
+        color: var(--violet);
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .toast {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: 14px;
+        z-index: 10;
+        border-radius: 12px;
+        padding: 12px;
+        background: var(--violet);
+        color: #fff;
+        text-align: center;
+        font-weight: 800;
+      }
+      @media (min-width: 720px) {
+        form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        form h2, form label:last-of-type, form .actions { grid-column: 1 / -1; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Agenda de turnos</h1>
+        <small>Guardado directo en Firebase, sin cache de la app.</small>
+        <span class="status" id="status">Cargando agenda...</span>
+      </header>
+
+      <section class="panel">
+        <h2>Calendario</h2>
+        <div class="calendar" id="calendar"></div>
+      </section>
+
+      <section class="panel selected-panel" id="selectedPanel">
+        <h2 id="selectedTitle">Turnos del día</h2>
+        <div id="selectedList"></div>
+      </section>
+
+      <form id="form">
+        <h2 id="formTitle">Cargar turno</h2>
+        <label>Nombre
+          <input id="nombre" placeholder="Turno reservado" />
+        </label>
+        <label>WhatsApp
+          <input id="telefono" placeholder="+54..." />
+        </label>
+        <label>Tipo de sesión
+          <select id="tipo">
+            <option>Coaching espiritual</option>
+            <option>Ayurveda y hábitos</option>
+            <option>Acompañamiento personal</option>
+          </select>
+        </label>
+        <label>Día y horario
+          <input id="fecha" type="datetime-local" required />
+        </label>
+        <label>Motivo / intención
+          <textarea id="motivo" placeholder="Tema a trabajar..."></textarea>
+        </label>
+        <div class="actions">
+          <button id="saveButton" type="submit">Crear turno</button>
+          <button class="secondary" type="button" id="reloadButton">Actualizar</button>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      const DB = "https://ashramganesha-default-rtdb.firebaseio.com";
+      const ADMIN_UID = "ScSvjS26eCQlWU7cmETvJHfaEh63";
+      const ADMIN_EMAIL = "gabriel@ashramganesha.com";
+      const state = { sessions: [], selectedDay: dayKey(new Date()) };
+
+      const els = {
+        calendar: document.getElementById("calendar"),
+        status: document.getElementById("status"),
+        form: document.getElementById("form"),
+        formTitle: document.getElementById("formTitle"),
+        nombre: document.getElementById("nombre"),
+        telefono: document.getElementById("telefono"),
+        tipo: document.getElementById("tipo"),
+        fecha: document.getElementById("fecha"),
+        motivo: document.getElementById("motivo"),
+        saveButton: document.getElementById("saveButton"),
+        reloadButton: document.getElementById("reloadButton"),
+        selectedPanel: document.getElementById("selectedPanel"),
+        selectedTitle: document.getElementById("selectedTitle"),
+        selectedList: document.getElementById("selectedList"),
+      };
+
+      els.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await saveTurno();
+      });
+      els.reloadButton.addEventListener("click", loadAgenda);
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function inputDateTime(date) {
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function dayKey(value) {
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      }
+
+      function setSelectedDay(day) {
+        state.selectedDay = day;
+        els.fecha.value = `${day}T18:00`;
+        els.formTitle.textContent = `Cargar turno para ${formatDay(day)}`;
+        render();
+        els.selectedPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      function formatDay(day) {
+        const date = new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+        return date.toLocaleDateString("es-AR", { weekday: "long", day: "2-digit", month: "long" });
+      }
+
+      function formatTime(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "Sin hora";
+        return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function roomName(fecha) {
+        return `ashram-sesion-${ADMIN_UID}-${String(fecha || Date.now()).replace(/[^a-zA-Z0-9]/g, "-")}`;
+      }
+
+      async function loadAgenda() {
+        els.status.textContent = "Leyendo Firebase...";
+        try {
+          const response = await fetch(`${DB}/sesiones.json?ts=${Date.now()}`, { cache: "no-store" });
+          if (!response.ok) throw new Error(await response.text());
+          const data = await response.json();
+          state.sessions = Object.entries(data || {})
+            .map(([id, item]) => ({ id, ...item }))
+            .filter((item) => item.estado !== "finalizada" && item.estado !== "solicitado")
+            .sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+          els.status.textContent = `${state.sessions.length} turnos leídos desde Firebase`;
+          render();
+        } catch (error) {
+          els.status.textContent = `No pude leer Firebase: ${error.message || error}`;
+        }
+      }
+
+      async function saveTurno() {
+        const fecha = els.fecha.value;
+        if (!fecha) {
+          toast("Elegí día y horario.");
+          return;
+        }
+        const payload = {
+          uid: ADMIN_UID,
+          usuario_email: ADMIN_EMAIL,
+          nombre: els.nombre.value.trim() || "Turno reservado",
+          telefono: els.telefono.value.trim(),
+          tipo: els.tipo.value.trim() || "Coaching espiritual",
+          fecha,
+          motivo: els.motivo.value.trim(),
+          sala: roomName(fecha),
+          estado: "reservado",
+          notas: "",
+          fecha_creacion: new Date().toISOString()
+        };
+
+        els.saveButton.disabled = true;
+        els.saveButton.textContent = "Guardando...";
+        try {
+          const response = await fetch(`${DB}/sesiones.json`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result?.error || JSON.stringify(result));
+          state.sessions = [...state.sessions, { id: result.name, ...payload }].sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+          els.nombre.value = "";
+          els.telefono.value = "";
+          els.motivo.value = "";
+          toast(`Turno guardado: ${formatTime(fecha)} ${payload.nombre}`);
+          els.status.textContent = `${state.sessions.length} turnos leídos desde Firebase`;
+          render();
+        } catch (error) {
+          toast(`No se pudo guardar turno: ${error.message || error}`);
+        } finally {
+          els.saveButton.disabled = false;
+          els.saveButton.textContent = "Crear turno";
+        }
+      }
+
+      function render() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const days = [];
+        for (let index = 0; index < 21; index += 1) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + index);
+          const day = dayKey(date);
+          days.push({
+            day,
+            label: formatDay(day),
+            items: state.sessions.filter((item) => dayKey(item.fecha) === day),
+          });
+        }
+        els.calendar.innerHTML = days.map(({ day, label, items }) => `
+          <button class="day ${items.length ? "has" : ""} ${state.selectedDay === day ? "active" : ""}" type="button" data-day="${day}">
+            <h3>${escapeHtml(label)}</h3>
+            ${items.length ? items.slice(0, 3).map((item) => `
+              <span class="item">
+                <b>${escapeHtml(formatTime(item.fecha))}</b>
+                <span>${escapeHtml(item.nombre || "Turno reservado")}</span>
+                <small>${escapeHtml(item.tipo || "Sesión")}</small>
+              </span>
+            `).join("") : '<p class="empty">Sin turnos</p>'}
+            ${items.length > 3 ? `<small>+${items.length - 3} más</small>` : ""}
+          </button>
+        `).join("");
+        els.calendar.querySelectorAll("[data-day]").forEach((button) => {
+          button.addEventListener("click", () => setSelectedDay(button.dataset.day));
+        });
+        renderSelectedDay();
+      }
+
+      function renderSelectedDay() {
+        const items = state.sessions.filter((item) => dayKey(item.fecha) === state.selectedDay);
+        els.selectedTitle.textContent = `Turnos de ${formatDay(state.selectedDay)}`;
+        els.selectedList.innerHTML = items.length ? items.map((item) => `
+          <article class="selected-item">
+            <b>${escapeHtml(formatTime(item.fecha))} - ${escapeHtml(item.nombre || "Turno reservado")}</b>
+            <span>${escapeHtml(item.tipo || "Sesión")}</span>
+            ${item.telefono ? `<small>WhatsApp: ${escapeHtml(item.telefono)}</small>` : ""}
+            ${item.motivo ? `<p>${escapeHtml(item.motivo)}</p>` : ""}
+            <a href="${escapeHtml(meetUrl(item.sala))}" target="_blank" rel="noopener">Abrir cámara</a>
+          </article>
+        `).join("") : '<p class="empty">No hay turnos cargados para este día.</p>';
+      }
+
+      function meetUrl(room) {
+        return `https://meet.jit.si/${encodeURIComponent(room || `ashram-sesion-${Date.now()}`)}`;
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function toast(message) {
+        const node = document.createElement("div");
+        node.className = "toast";
+        node.textContent = message;
+        document.body.appendChild(node);
+        window.setTimeout(() => node.remove(), 4200);
+      }
+
+      setSelectedDay(state.selectedDay);
+      els.fecha.value = inputDateTime(new Date(Date.now() + 24 * 60 * 60 * 1000)).slice(0, 11) + "18:00";
+      loadAgenda();
+    </script>
+  </body>
+</html>

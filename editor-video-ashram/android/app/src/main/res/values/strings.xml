@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Editor Ashram</string>
+    <string name="title_activity_main">Editor Ashram</string>
+    <string name="package_name">com.ashram.editor</string>
+    <string name="custom_url_scheme">com.ashram.editor</string>
+</resources>

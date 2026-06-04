@@ -28,7 +28,7 @@ export function youtubeEmbedUrl(url) {
       }
     }
 
-    return id ? `https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1` : url;
+    return id ? `https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1&vq=hd1080` : url;
   } catch {
     return url;
   }

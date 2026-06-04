@@ -1,6 +1,7 @@
-import { BookOpen, Download, Edit3, FilePlus2, Plus, Save, Trash2 } from "lucide-react";
+import { BookOpen, Download, Edit3, FilePlus2, GraduationCap, Library, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import NoteEditor from "./NoteEditor";
+import { uploadEpub } from "./utils";
 import {
   deleteBookChapter,
   deleteBookProject,
@@ -18,13 +19,15 @@ const emptyBook = {
   estado: "borrador",
 };
 
-export default function BookStudio({ profile, onToast }) {
+export default function BookStudio({ profile, onToast, onPublishToLibrary }) {
   const [books, setBooks] = useState([]);
   const [chapters, setChapters] = useState([]);
   const [selectedBookId, setSelectedBookId] = useState("");
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [editingBook, setEditingBook] = useState(null);
   const [editingChapter, setEditingChapter] = useState(null);
+  const [epubChoiceOpen, setEpubChoiceOpen] = useState(false);
+  const [epubBusy, setEpubBusy] = useState(false);
   const isAdmin = profile?.rol === "admin";
 
   useEffect(() => {
@@ -99,12 +102,13 @@ export default function BookStudio({ profile, onToast }) {
 
   async function saveChapter(chapter) {
     if (!selectedBook) return;
-    const id = await saveBookChapter(selectedBook.id, {
+    const savedChapter = await saveBookChapter(selectedBook.id, {
       ...chapter,
       orden: chapter.orden || chapters.length + 1,
     });
+    setChapters((current) => sortChapters(upsertChapter(current, savedChapter)));
     setEditingChapter(null);
-    setSelectedChapterId(id);
+    setSelectedChapterId(savedChapter.id);
     onToast?.("Capitulo guardado.");
   }
 
@@ -115,18 +119,76 @@ export default function BookStudio({ profile, onToast }) {
     onToast?.("Capitulo eliminado.");
   }
 
-  function downloadEpub() {
+  function createSelectedEpubFile() {
     if (!selectedBook) return;
+    const emptyChapters = chapters.filter((chapter) => !chapterMarkdown(chapter).trim());
+    if (emptyChapters.length) {
+      const proceed = window.confirm(`Hay ${emptyChapters.length} capitulo${emptyChapters.length === 1 ? "" : "s"} sin contenido guardado. ¿Crear el EPUB igual?`);
+      if (!proceed) return null;
+    }
     const blob = createEpubBlob(selectedBook, chapters);
-    const url = URL.createObjectURL(blob);
+    const fileName = `${slugify(selectedBook.titulo || "libro")}.epub`;
+    return new File([blob], fileName, { type: "application/epub+zip" });
+  }
+
+  function downloadEpub() {
+    const file = createSelectedEpubFile();
+    if (!file) return;
+    const url = URL.createObjectURL(file);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${slugify(selectedBook.titulo || "libro")}.epub`;
+    link.download = file.name;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+    setEpubChoiceOpen(false);
     onToast?.("EPUB exportado.");
+  }
+
+  async function publishEpub(target = "biblioteca") {
+    if (!selectedBook) return;
+    setEpubBusy(true);
+    try {
+      const file = createSelectedEpubFile();
+      if (!file) return;
+      const isLibrary = target === "biblioteca";
+      const isCourse = target === "curso";
+      const uploaded = await uploadEpub(file, isLibrary ? "biblioteca/epubs" : "contenidos/conocimiento/epubs");
+      const epubDraft = {
+        titulo: selectedBook.titulo || "",
+        descripcion: selectedBook.descripcion || "",
+        imagen: selectedBook.portadaUrl || "",
+        epub: uploaded.url,
+        epub_url: uploaded.url,
+        epub_path: uploaded.path,
+        epub_file_name: file.name,
+        epub_title: selectedBook.titulo || "",
+        epub_chapters: chapters.map((chapter) => ({
+          title: chapter.titulo || "",
+          content: chapterMarkdown(chapter),
+        })),
+      };
+      if (isLibrary) {
+        epubDraft.autor = selectedBook.autor || "";
+        epubDraft.portada_url = selectedBook.portadaUrl || "";
+      } else {
+        epubDraft.etiqueta = isCourse ? selectedBook.titulo || "Curso" : "Conocimiento";
+        epubDraft.categoria = epubDraft.etiqueta;
+        epubDraft.orden = isCourse ? 1 : "";
+        epubDraft.curso_acceso = isCourse ? "gratis" : "suscripcion";
+        epubDraft.video = "";
+        epubDraft.link_video_original = "";
+      }
+      onPublishToLibrary?.(target, epubDraft);
+      setEpubChoiceOpen(false);
+      const targetLabel = isLibrary ? "Biblioteca" : isCourse ? "Curso" : "Conocimiento";
+      onToast?.(`EPUB cargado en el formulario de ${targetLabel}.`);
+    } catch (error) {
+      onToast?.(`No pude preparar el EPUB: ${error.message}`);
+    } finally {
+      setEpubBusy(false);
+    }
   }
 
   return (
@@ -166,9 +228,29 @@ export default function BookStudio({ profile, onToast }) {
           <div className="book-actions">
             <button className="ghost compact" type="button" onClick={() => selectedBook && setEditingBook(selectedBook)} disabled={!selectedBook}><Edit3 size={15} /> Editar libro</button>
             <button className="ghost compact" type="button" onClick={() => removeBook(selectedBook)} disabled={!selectedBook}><Trash2 size={15} /> Borrar</button>
-            <button className="primary small" type="button" onClick={downloadEpub} disabled={!selectedBook || !chapters.length}><Download size={15} /> EPUB</button>
+            <button className="primary small" type="button" onClick={() => setEpubChoiceOpen(true)} disabled={!selectedBook || !chapters.length}><Download size={15} /> EPUB</button>
           </div>
         </div>
+
+        {epubChoiceOpen ? (
+          <div className="book-epub-popover" role="dialog" aria-label="Exportar EPUB">
+            <strong>EPUB del libro</strong>
+            <small>Elegi si queres publicarlo, cargarlo como conocimiento/curso o descargarlo.</small>
+            <div>
+              <button className="primary small" type="button" onClick={() => publishEpub("biblioteca")} disabled={epubBusy}>
+                <Library size={15} /> {epubBusy ? "Preparando..." : "Biblioteca"}
+              </button>
+              <button className="primary small" type="button" onClick={() => publishEpub("conocimiento")} disabled={epubBusy}>
+                <BookOpen size={15} /> Conocimiento
+              </button>
+              <button className="primary small" type="button" onClick={() => publishEpub("curso")} disabled={epubBusy}>
+                <GraduationCap size={15} /> Curso
+              </button>
+              <button className="ghost compact" type="button" onClick={downloadEpub} disabled={epubBusy}>Descargar</button>
+              <button className="ghost compact" type="button" onClick={() => setEpubChoiceOpen(false)} disabled={epubBusy}>Cancelar</button>
+            </div>
+          </div>
+        ) : null}
 
         {editingBook ? (
           <form className="book-meta-form" onSubmit={saveBook}>
@@ -215,7 +297,7 @@ export default function BookStudio({ profile, onToast }) {
                     <button className="ghost compact danger" type="button" onClick={() => removeChapter(selectedChapter)} disabled={!selectedChapter}><Trash2 size={15} /> Borrar capitulo</button>
                   </div>
                   <NoteEditor
-                    key={editorChapter.id || `new-chapter-${selectedBook.id}-${chapters.length}`}
+                    key={`${editorChapter.id || `new-chapter-${selectedBook.id}-${chapters.length}`}-${editorChapter.actualizadoEn || ""}`}
                     note={editorChapter}
                     folders={[]}
                     notes={chapters.filter((chapter) => chapter.id !== editorChapter.id)}
@@ -241,6 +323,17 @@ export default function BookStudio({ profile, onToast }) {
 
 function wordCount(text = "") {
   return (text.replace(/[#>*_`[\]()!-]/g, " ").match(/\S+/g) || []).length;
+}
+
+function upsertChapter(chapters, chapter) {
+  if (!chapter?.id) return chapters;
+  const exists = chapters.some((item) => item.id === chapter.id);
+  if (!exists) return [...chapters, chapter];
+  return chapters.map((item) => item.id === chapter.id ? { ...item, ...chapter } : item);
+}
+
+function sortChapters(chapters) {
+  return [...chapters].sort((a, b) => (a.orden || 0) - (b.orden || 0));
 }
 
 function createEpubBlob(book, chapters) {
@@ -292,13 +385,24 @@ ${chapters.map((chapter, index) => `<li><a href="chapter-${index + 1}.xhtml">${e
 }
 
 function chapterXhtml(chapter, index) {
+  const markdown = chapterMarkdown(chapter);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="es">
 <head><title>${escapeXml(chapter.titulo || `Capitulo ${index}`)}</title></head>
 <body>
 <h1>${escapeXml(chapter.titulo || `Capitulo ${index}`)}</h1>
-${markdownToXhtml(chapter.contenidoMarkdown || "")}
+${markdownToXhtml(markdown || "_Capitulo sin contenido guardado._")}
 </body></html>`;
+}
+
+function chapterMarkdown(chapter) {
+  return String(
+    chapter?.contenidoMarkdown
+    || chapter?.contentMarkdown
+    || chapter?.contenido
+    || chapter?.texto
+    || "",
+  );
 }
 
 function markdownToXhtml(markdown) {
