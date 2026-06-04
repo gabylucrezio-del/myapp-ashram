@@ -1,5 +1,17 @@
 # Proyectos Ashram
 
+## Registro de cambios
+
+### 2026-06-04 - App Ashram web
+- Administracion > Libros: el boton `EPUB` ahora permite cargar el libro en Biblioteca, Conocimiento o Curso, ademas de descargarlo.
+- Al elegir Biblioteca, Conocimiento o Curso, se abre el formulario correspondiente con el EPUB ya subido y vinculado.
+- En Curso, la serie se precarga con el titulo del libro y el material queda listo para completar los datos faltantes.
+- En la vista de cursos, si el material tiene EPUB, el usuario ve `Ver libro` y se abre directamente el visor EPUB.
+- El visor EPUB suma boton `Imprimir`, con estilos de impresion para imprimir el capitulo abierto de forma limpia.
+- Se verifico con `npm.cmd run build`.
+- Se publico en Firebase Hosting: `https://ashramganesha.web.app`.
+- Se subio a GitHub en `main`: commit `d875016` (`Update Ashram web and companion tools`).
+
 ## App Ashram
 - Tipo: Web app principal.
 - Carpeta: `web/`.
