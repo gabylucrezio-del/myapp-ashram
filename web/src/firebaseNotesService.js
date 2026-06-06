@@ -112,6 +112,7 @@ export async function saveNote(note) {
     titulo: (note.titulo || "").trim(),
     folderId: note.folderId || "",
     contenidoMarkdown: note.contenidoMarkdown || "",
+    keywords: (note.keywords || "").trim(),
     imagenUrl: (note.imagenUrl || "").trim(),
     audioUrl: (note.audioUrl || "").trim(),
     pdfUrl: (note.pdfUrl || "").trim(),
@@ -137,6 +138,7 @@ export async function publishNoteToBlog(note) {
   await push(ref(db, "blog"), {
     titulo: note.titulo,
     descripcion: note.contenidoMarkdown || "",
+    keywords: (note.keywords || "").trim(),
     imagen: publishedImageUrl(note),
     etiqueta: "Cuaderno",
     fecha_carga: now,
@@ -150,6 +152,7 @@ export async function publishNoteToSatsang(note) {
     tema: note.titulo,
     titulo: note.titulo,
     descripcion: note.contenidoMarkdown || "",
+    keywords: (note.keywords || "").trim(),
     imagen: publishedImageUrl(note),
     video: note.videoUrl || "",
     link_video_original: note.videoUrl || "",
@@ -162,6 +165,7 @@ export async function publishNoteToMeditaciones(note) {
   await push(ref(db, "meditaciones"), {
     titulo: note.titulo,
     descripcion: note.contenidoMarkdown || "",
+    keywords: (note.keywords || "").trim(),
     detalle: "",
     imagen: publishedImageUrl(note),
     audio: note.audioUrl || "",
@@ -178,6 +182,7 @@ export async function publishNoteToCurso(note) {
   await push(ref(db, "conocimiento"), {
     titulo: note.titulo,
     descripcion: note.contenidoMarkdown || "",
+    keywords: (note.keywords || "").trim(),
     etiqueta: "Curso",
     imagen: publishedImageUrl(note),
     video: note.videoUrl || "",
@@ -218,6 +223,7 @@ export async function saveBookProject(book) {
     titulo: (book.titulo || "").trim(),
     autor: (book.autor || "").trim(),
     descripcion: (book.descripcion || "").trim(),
+    keywords: (book.keywords || "").trim(),
     portadaUrl: (book.portadaUrl || "").trim(),
     estado: book.estado || "borrador",
     actualizadoEn: now,

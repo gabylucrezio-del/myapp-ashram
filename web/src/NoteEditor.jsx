@@ -1,10 +1,11 @@
-import { Bold, CheckSquare, Code2, Heading1, Heading2, Heading3, Image as ImageIcon, Italic, Link, List, ListOrdered, Music, Quote, Redo2, Save, StickyNote, Undo2, Video, Volume2 } from "lucide-react";
+import { Bold, CheckSquare, Code2, Heading1, Heading2, Heading3, Image as ImageIcon, Italic, Link, List, ListOrdered, Music, Quote, Redo2, Save, StickyNote, Table2, Undo2, Video, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 const emptyNote = {
   titulo: "",
   folderId: "",
   contenidoMarkdown: "",
+  keywords: "",
   imagenUrl: "",
   audioUrl: "",
   pdfUrl: "",
@@ -18,6 +19,7 @@ const slashCommands = [
   { id: "pdf", label: "Link de PDF", icon: Link },
   { id: "audio", label: "Link de audio", icon: Music },
   { id: "imagen", label: "Link de imagen", icon: ImageIcon },
+  { id: "tabla", label: "Tabla", icon: Table2 },
 ];
 
 export default function NoteEditor({ note, folders, notes = [], defaultFolderId = "", onSave, mode = "note", hideResourceFields = false }) {
@@ -82,6 +84,11 @@ export default function NoteEditor({ note, folders, notes = [], defaultFolderId 
   }
 
   function runSlashCommand(command) {
+    if (command === "tabla") {
+      insertTable();
+      return;
+    }
+
     if (command === "nota") {
       if (!notes.length) {
         insertHtml('<a href="nota:">Nota vinculada</a>');
@@ -138,6 +145,21 @@ export default function NoteEditor({ note, folders, notes = [], defaultFolderId 
     insertHtml("<blockquote>cita</blockquote>");
   }
 
+  function insertTable() {
+    insertHtml(`
+      <table>
+        <thead>
+          <tr><th>Columna 1</th><th>Columna 2</th><th>Columna 3</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Texto</td><td>Texto</td><td>Texto</td></tr>
+          <tr><td>Texto</td><td>Texto</td><td>Texto</td></tr>
+        </tbody>
+      </table>
+      <p><br></p>
+    `);
+  }
+
   function handleEditorKeyDown(event) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
@@ -183,6 +205,7 @@ export default function NoteEditor({ note, folders, notes = [], defaultFolderId 
     { label: "Imagen", icon: ImageIcon, action: () => runSlashCommand("imagen") },
     { label: "Audio", icon: Volume2, action: () => runSlashCommand("audio") },
     { label: "Video", icon: Video, action: () => runSlashCommand("youtube") },
+    { label: "Tabla", icon: Table2, action: insertTable },
     { label: "Codigo", icon: Code2, action: insertCode },
     { label: "Cita", icon: Quote, action: insertQuote },
   ];
@@ -219,6 +242,9 @@ export default function NoteEditor({ note, folders, notes = [], defaultFolderId 
               <option value="listo">Listo</option>
               <option value="publicado">Publicado</option>
             </select>
+          </label>
+          <label>Palabras clave
+            <input value={form.keywords || ""} onChange={(event) => setField("keywords", event.target.value)} placeholder="Ej: ansiedad, vata, calma, respiración, Ganesha" />
           </label>
         </div>
       ) : (
@@ -319,22 +345,34 @@ function markdownToHtml(markdown = "") {
     }
   }
 
-  lines.forEach((rawLine) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const line = rawLine.trim();
     if (!line) {
       flushList();
-      return;
+      continue;
+    }
+    if (line.startsWith("|")) {
+      const tableLines = [];
+      while (index < lines.length && lines[index].trim().startsWith("|")) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      index -= 1;
+      flushList();
+      html.push(markdownTableToHtml(tableLines.join("\n")));
+      continue;
     }
     if (line.startsWith("- ")) {
       orderedItems = [];
       listItems.push(line.slice(2));
-      return;
+      continue;
     }
     const ordered = line.match(/^\d+\.\s+(.+)$/);
     if (ordered) {
       listItems = [];
       orderedItems.push(ordered[1]);
-      return;
+      continue;
     }
     flushList();
     if (line.startsWith("### ")) html.push(`<h3>${renderInlineMarkdown(line.slice(4))}</h3>`);
@@ -342,7 +380,7 @@ function markdownToHtml(markdown = "") {
     else if (line.startsWith("# ")) html.push(`<h1>${renderInlineMarkdown(line.slice(2))}</h1>`);
     else if (line.startsWith("> ")) html.push(`<blockquote>${renderInlineMarkdown(line.slice(2))}</blockquote>`);
     else html.push(`<p>${renderInlineMarkdown(line)}</p>`);
-  });
+  }
   flushList();
   return html.join("");
 }
@@ -378,6 +416,7 @@ function blockToMarkdown(node) {
   if (tag === "blockquote") return `> ${inlineToMarkdown(node)}\n`;
   if (tag === "ul") return `${Array.from(node.children).map((child) => `- ${inlineToMarkdown(child)}`).join("\n")}\n`;
   if (tag === "ol") return `${Array.from(node.children).map((child, index) => `${index + 1}. ${inlineToMarkdown(child)}`).join("\n")}\n`;
+  if (tag === "table") return `${htmlTableToMarkdown(node)}\n`;
   if (tag === "figure") return `${inlineToMarkdown(node)}\n`;
   if (tag === "p" || tag === "div") return `${inlineToMarkdown(node)}\n`;
   return inlineToMarkdown(node);
@@ -396,8 +435,29 @@ function inlineToMarkdown(node) {
     if (tag === "img") return `![${child.getAttribute("alt") || "Imagen"}](${child.getAttribute("src") || child.src})`;
     if (tag === "br") return "\n";
     if (tag === "li") return inlineToMarkdown(child);
+    if (tag === "td" || tag === "th") return inlineToMarkdown(child);
     return text;
   }).join("").trim();
+}
+
+function markdownTableToHtml(table = "") {
+  const rows = table.trim().split(/\r?\n/).filter((row) => row.trim().startsWith("|"));
+  if (rows.length < 2) return `<p>${renderInlineMarkdown(table)}</p>`;
+  const cells = rows.map((row) => row.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
+  const headers = cells[0] || [];
+  const body = cells.slice(2);
+  return `<table><thead><tr>${headers.map((header) => `<th>${renderInlineMarkdown(header)}</th>`).join("")}</tr></thead><tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function htmlTableToMarkdown(table) {
+  const rows = Array.from(table.querySelectorAll("tr")).map((row) => Array.from(row.children).map((cell) => inlineToMarkdown(cell).replace(/\|/g, "\\|")));
+  if (!rows.length) return "";
+  const columnCount = Math.max(...rows.map((row) => row.length));
+  const normalized = rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] || ""));
+  const header = normalized[0];
+  const divider = header.map(() => "---");
+  const body = normalized.slice(1);
+  return [header, divider, ...body].map((row) => `| ${row.join(" | ")} |`).join("\n");
 }
 
 function getTextBeforeCursor(editor) {

@@ -91,7 +91,7 @@ export default function SidebarTree({
       </button>
       <div className="doc-tree">
         {loading ? (
-          <p className="drive-tree-message">Cargando carpetas de Google Drive...</p>
+          <p className="drive-tree-message">Cargando biblioteca desde Firestore...</p>
         ) : null}
         {!loading && !rootFolders.length && !rootDocuments.length ? (
           <p className="drive-tree-message">No hay carpetas ni documentos para mostrar.</p>

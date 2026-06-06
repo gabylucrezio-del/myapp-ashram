@@ -12,6 +12,7 @@ export default function EpubExportModal({ document, onClose, onExported, onPubli
     title: document.title || "",
     author: "Ashram Ganesha",
     description: "",
+    keywords: "",
     language: "es",
     coverUrl: "",
     fileName: document.title || "libro",
@@ -49,6 +50,7 @@ export default function EpubExportModal({ document, onClose, onExported, onPubli
       title: form.title,
       author: form.author,
       description: form.description,
+      keywords: form.keywords,
       coverUrl: form.coverUrl,
     });
   }
@@ -73,6 +75,7 @@ export default function EpubExportModal({ document, onClose, onExported, onPubli
         <label>Titulo del libro<input value={form.title} onChange={(event) => setField("title", event.target.value)} /></label>
         <label>Autor<input value={form.author} onChange={(event) => setField("author", event.target.value)} /></label>
         <label>Descripcion breve<textarea value={form.description} onChange={(event) => setField("description", event.target.value)} /></label>
+        <label>Palabras clave<input value={form.keywords} onChange={(event) => setField("keywords", event.target.value)} placeholder="Ej: ansiedad, vata, calma, respiración, Ganesha" /></label>
         <label>Idioma<input value={form.language} onChange={(event) => setField("language", event.target.value)} /></label>
         <label>Nombre del archivo<input value={form.fileName} onChange={(event) => setField("fileName", event.target.value)} /></label>
       </div>

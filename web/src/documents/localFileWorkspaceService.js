@@ -6,7 +6,16 @@ import {
 } from "./localDbService";
 
 const MANIFEST_NAME = ".ashram-manifest.json";
-const ASSET_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif", "svg", "pdf", "mp3", "m4a", "wav", "ogg", "mp4", "mov", "webm", "json"]);
+const DOCUMENT_EXTENSIONS = new Set(["md", "markdown", "txt"]);
+const ASSET_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "webp", "gif", "avif", "svg",
+  "pdf", "doc", "docx", "odt", "rtf",
+  "xls", "xlsx", "ods", "csv",
+  "ppt", "pptx", "odp",
+  "mp3", "m4a", "wav", "ogg",
+  "mp4", "mov", "webm",
+  "json", "html", "htm", "epub", "zip",
+]);
 
 export async function selectLocalWorkspaceFolder({ forceFresh = false } = {}) {
   if (!window.showDirectoryPicker) return null;
@@ -58,7 +67,7 @@ export async function scanLocalWorkspace(rootHandle) {
         continue;
       }
       const extension = extensionOf(name);
-      if (extension === "md") {
+      if (DOCUMENT_EXTENSIONS.has(extension)) {
         const contentMarkdown = await readFileText(handle);
         documents.push(documentFromPath(relativePath, handle, contentMarkdown));
       } else if (ASSET_EXTENSIONS.has(extension)) {
@@ -234,11 +243,11 @@ export async function updateLocalManifest(rootHandle, drivePatch = {}) {
 }
 
 export async function backupChangedFilesToDrive() {
-  throw new Error("El respaldo incremental a Drive se ejecuta desde syncService.");
+  throw new Error("El respaldo automatico a Drive esta desactivado. Usa la exportacion manual de Firestore.");
 }
 
 export async function syncChangedFilesFromDrive() {
-  throw new Error("La sincronizacion incremental desde Drive se ejecuta desde syncService.");
+  throw new Error("La sincronizacion desde Drive esta desactivada. Firestore es la fuente principal.");
 }
 
 async function readLocalManifest(rootHandle) {
@@ -410,7 +419,7 @@ function extensionOf(path = "") {
 }
 
 function stripMarkdownExtension(value = "") {
-  return String(value || "").replace(/\.md$/i, "");
+  return String(value || "").replace(/\.(md|markdown|txt)$/i, "");
 }
 
 function safeSegment(value = "") {

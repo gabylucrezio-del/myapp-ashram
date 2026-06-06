@@ -15,6 +15,7 @@ const emptyBook = {
   titulo: "",
   autor: "",
   descripcion: "",
+  keywords: "",
   portadaUrl: "",
   estado: "borrador",
 };
@@ -158,6 +159,7 @@ export default function BookStudio({ profile, onToast, onPublishToLibrary }) {
       const epubDraft = {
         titulo: selectedBook.titulo || "",
         descripcion: selectedBook.descripcion || "",
+        keywords: selectedBook.keywords || "",
         imagen: selectedBook.portadaUrl || "",
         epub: uploaded.url,
         epub_url: uploaded.url,
@@ -211,7 +213,7 @@ export default function BookStudio({ profile, onToast, onPublishToLibrary }) {
               <BookOpen size={16} />
               <span>
                 <strong>{book.titulo || "Sin titulo"}</strong>
-                <small>{book.autor || "Sin autor"}</small>
+                <small>{book.autor || book.keywords || "Sin autor"}</small>
               </span>
             </button>
           ))}
@@ -257,6 +259,7 @@ export default function BookStudio({ profile, onToast, onPublishToLibrary }) {
             <label>Titulo<input value={editingBook.titulo} onChange={(event) => setEditingBook((current) => ({ ...current, titulo: event.target.value }))} placeholder="Titulo del libro" /></label>
             <label>Autor<input value={editingBook.autor} onChange={(event) => setEditingBook((current) => ({ ...current, autor: event.target.value }))} placeholder="Nombre del autor" /></label>
             <label>Descripcion<textarea value={editingBook.descripcion} onChange={(event) => setEditingBook((current) => ({ ...current, descripcion: event.target.value }))} placeholder="Descripcion breve" /></label>
+            <label>Palabras clave<input value={editingBook.keywords || ""} onChange={(event) => setEditingBook((current) => ({ ...current, keywords: event.target.value }))} placeholder="Ej: ansiedad, vata, calma, respiración, Ganesha" /></label>
             <label>Portada URL<input value={editingBook.portadaUrl} onChange={(event) => setEditingBook((current) => ({ ...current, portadaUrl: event.target.value }))} placeholder="Link de portada opcional" /></label>
             <div className="form-actions">
               <button className="ghost compact" type="button" onClick={() => setEditingBook(null)}>Cancelar</button>
@@ -414,15 +417,27 @@ function markdownToXhtml(markdown) {
     html.push(`<ul>${list.map((item) => `<li>${inlineMarkdownToXhtml(item)}</li>`).join("")}</ul>`);
     list = [];
   }
-  lines.forEach((rawLine) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const line = rawLine.trim();
     if (!line) {
       flushList();
-      return;
+      continue;
+    }
+    if (line.startsWith("|")) {
+      const tableLines = [];
+      while (index < lines.length && lines[index].trim().startsWith("|")) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      index -= 1;
+      flushList();
+      html.push(markdownTableToXhtml(tableLines.join("\n")));
+      continue;
     }
     if (line.startsWith("- ")) {
       list.push(line.slice(2));
-      return;
+      continue;
     }
     flushList();
     if (line.startsWith("### ")) html.push(`<h3>${inlineMarkdownToXhtml(line.slice(4))}</h3>`);
@@ -430,9 +445,18 @@ function markdownToXhtml(markdown) {
     else if (line.startsWith("# ")) html.push(`<h1>${inlineMarkdownToXhtml(line.slice(2))}</h1>`);
     else if (line.startsWith("> ")) html.push(`<blockquote>${inlineMarkdownToXhtml(line.slice(2))}</blockquote>`);
     else html.push(`<p>${inlineMarkdownToXhtml(line)}</p>`);
-  });
+  }
   flushList();
   return html.join("\n") || "<p></p>";
+}
+
+function markdownTableToXhtml(table = "") {
+  const rows = table.trim().split(/\r?\n/).filter((row) => row.trim().startsWith("|"));
+  if (rows.length < 2) return `<p>${inlineMarkdownToXhtml(table)}</p>`;
+  const cells = rows.map((row) => row.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
+  const headers = cells[0] || [];
+  const body = cells.slice(2);
+  return `<table><thead><tr>${headers.map((header) => `<th>${inlineMarkdownToXhtml(header)}</th>`).join("")}</tr></thead><tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${inlineMarkdownToXhtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function inlineMarkdownToXhtml(text) {

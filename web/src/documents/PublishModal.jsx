@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ExportModal from "./ExportModal";
+import { uploadOptimizedImage } from "../utils";
 
 const publishTypes = [
   { id: "post", label: "Post" },
@@ -18,7 +19,9 @@ export default function PublishModal({ document, initialType = "post", onClose, 
     subtitle: "",
     description: defaults.description || "",
     summary: "",
+    keywords: defaults.keywords || document?.keywords || "",
     coverUrl: defaults.coverUrl || document?.coverUrl || "",
+    imageStoragePath: defaults.imageStoragePath || document?.imageStoragePath || "",
     category: "",
     tags: "",
     author: defaults.author || "Ashram Ganesha",
@@ -37,6 +40,7 @@ export default function PublishModal({ document, initialType = "post", onClose, 
     includeContent: true,
   });
   const [busy, setBusy] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
   const chapters = detectChapters(document?.contentMarkdown || "");
 
   function setField(field, value) {
@@ -54,13 +58,38 @@ export default function PublishModal({ document, initialType = "post", onClose, 
       await onPublish({
         ...form,
         tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
-        sourceDriveFileId: document?.driveFileId || "",
-        sourceDriveFolderId: document?.driveFolderId || document?.folderId || "",
+        keywordList: form.keywords.split(",").map((keyword) => keyword.trim()).filter(Boolean),
+        sourceDocumentId: document?.id || "",
+        sourceFolderId: document?.folderId || "",
+        imageUrl: form.coverUrl,
+        imageStoragePath: form.imageStoragePath || "",
         content: form.includeContent ? document?.contentMarkdown || "" : "",
       });
       onClose();
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function uploadPostImage(file) {
+    if (!file) return;
+    setImageBusy(true);
+    try {
+      const postId = document?.publishedContentId || document?.id || "temp";
+      const folder = postId === "temp"
+        ? `posts/images/temp/${Date.now()}`
+        : `posts/images/${postId}`;
+      const uploaded = await uploadOptimizedImage(file, folder);
+      setForm((current) => ({
+        ...current,
+        coverUrl: uploaded.url,
+        imageStoragePath: uploaded.path,
+      }));
+    } catch (error) {
+      console.error("No se pudo subir la imagen del post", error);
+      window.alert(error.message || "No se pudo subir la imagen.");
+    } finally {
+      setImageBusy(false);
     }
   }
 
@@ -98,13 +127,34 @@ export default function PublishModal({ document, initialType = "post", onClose, 
         ) : null}
         <label>{form.type === "post" ? "Imagen destacada / portada" : "Portada / imagen"}
           <input value={form.coverUrl} onChange={(event) => setField("coverUrl", event.target.value)} />
-          <small>URL, Google Drive, imagen subida o biblioteca existente.</small>
+          <small>URL, imagen subida o biblioteca existente.</small>
         </label>
+        {form.type === "post" ? (
+          <div className="post-image-upload-field">
+            <button className="ghost compact" type="button" disabled={imageBusy} onClick={() => window.document.getElementById("post-image-upload-input")?.click()}>
+              {imageBusy ? "Subiendo imagen..." : "Subir imagen"}
+            </button>
+            <input
+              id="post-image-upload-input"
+              hidden
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) => {
+                uploadPostImage(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            {form.coverUrl ? <img className="post-image-preview" src={form.coverUrl} alt="" /> : null}
+          </div>
+        ) : null}
         <label>Categoria
           <input value={form.category} onChange={(event) => setField("category", event.target.value)} />
         </label>
         <label>Autor
           <input value={form.author} onChange={(event) => setField("author", event.target.value)} />
+        </label>
+        <label>Palabras clave
+          <input value={form.keywords} onChange={(event) => setField("keywords", event.target.value)} placeholder="Ej: ansiedad, vata, calma, respiración, Ganesha" />
         </label>
         <label>Estado
           <select value={form.status} onChange={(event) => setField("status", event.target.value)}>
@@ -240,7 +290,7 @@ export default function PublishModal({ document, initialType = "post", onClose, 
           Incluir texto del documento
         </label>
         <p className="export-status">
-          Firebase guardara solo esta publicacion. El original queda privado en Google Drive con referencia al archivo fuente.
+          Firebase guardara solo esta publicacion. El documento original queda privado en Firestore y no se modifica.
         </p>
         <div className="export-actions">
           <button className="ghost compact" type="button" onClick={onClose}>Cancelar</button>

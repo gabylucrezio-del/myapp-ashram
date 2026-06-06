@@ -1,7 +1,7 @@
 export default function SyncStatusDot({ status }) {
   const value = normalizeStatus(typeof status === "string" ? status : status?.status);
   const labels = {
-    synced: "Actualizado en Drive",
+    synced: "Actualizado en Firestore",
     pending: "Pendiente de guardar",
     syncing: "Guardando...",
     offline: "Sin conexion",

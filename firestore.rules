@@ -1,0 +1,337 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdminEmail() {
+      return request.auth.token.email in [
+        'gabriel@ashramganesha.com',
+        'ayurvedaunaformadevida@gmail.com'
+      ];
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && isAdminEmail();
+    }
+
+    function isString(field) {
+      return field is string;
+    }
+
+    function isOptionalString(data, field, maxLength) {
+      return !data.keys().hasAny([field])
+        || (data[field] is string && data[field].size() <= maxLength);
+    }
+
+    function isOptionalBool(data, field) {
+      return !data.keys().hasAny([field]) || data[field] is bool;
+    }
+
+    function isOptionalList(data, field, maxSize) {
+      return !data.keys().hasAny([field])
+        || (data[field] is list && data[field].size() <= maxSize);
+    }
+
+    function isOptionalInt(data, field) {
+      return !data.keys().hasAny([field]) || data[field] is int;
+    }
+
+    function isOptionalTimestamp(data, field) {
+      return !data.keys().hasAny([field]) || data[field] is timestamp;
+    }
+
+    function ownsUserData(data) {
+      return signedIn() && data.userId == request.auth.uid;
+    }
+
+    function validAnalyticsEvent(data) {
+      return data.keys().hasOnly([
+        'userId', 'eventType', 'contentId', 'contentTitle',
+        'contentType', 'contentCategory', 'category', 'tags', 'keywords',
+        'question', 'searchQuery', 'detectedTopics', 'durationMinutes',
+        'timestamp', 'dateKey', 'deviceType'
+      ])
+      && ownsUserData(data)
+      && data.eventType is string
+      && data.eventType.size() <= 80
+      && [
+        'login', 'logout', 'open_section', 'open_post', 'open_article',
+        'open_course', 'open_meditation', 'open_book', 'ask_ganesha',
+        'search_content', 'finish_meditation', 'open_video',
+        'click_related_resource',
+        'open_biblioteca', 'open_conocimiento', 'open_ejercicios',
+        'open_satsang', 'open_content'
+      ].hasAny([data.eventType])
+      && isOptionalString(data, 'contentId', 180)
+      && isOptionalString(data, 'contentTitle', 220)
+      && isOptionalString(data, 'contentType', 80)
+      && isOptionalString(data, 'contentCategory', 160)
+      && isOptionalString(data, 'category', 160)
+      && isOptionalString(data, 'question', 900)
+      && isOptionalString(data, 'searchQuery', 220)
+      && isOptionalString(data, 'dateKey', 20)
+      && isOptionalString(data, 'deviceType', 40)
+      && isOptionalList(data, 'detectedTopics', 12)
+      && isOptionalList(data, 'tags', 20)
+      && isOptionalList(data, 'keywords', 20)
+      && isOptionalInt(data, 'durationMinutes')
+      && isOptionalTimestamp(data, 'timestamp');
+    }
+
+    function validUserAnalytics(data) {
+      return data.keys().hasOnly([
+        'userId', 'email', 'displayName', 'registeredAt', 'lastLogin',
+        'lastActiveAt', 'lastActiveDateKey', 'totalLogins', 'totalMinutes',
+        'deviceType', 'interests', 'updatedAt'
+      ])
+      && ownsUserData(data)
+      && isOptionalString(data, 'email', 180)
+      && isOptionalString(data, 'displayName', 160)
+      && isOptionalString(data, 'lastActiveDateKey', 20)
+      && isOptionalString(data, 'deviceType', 40)
+      && isOptionalInt(data, 'totalLogins')
+      && isOptionalInt(data, 'totalMinutes')
+      && isOptionalList(data, 'interests', 80)
+      && isOptionalTimestamp(data, 'registeredAt')
+      && isOptionalTimestamp(data, 'lastLogin')
+      && isOptionalTimestamp(data, 'lastActiveAt')
+      && isOptionalTimestamp(data, 'updatedAt');
+    }
+
+    function validPresence(data) {
+      return data.keys().hasOnly([
+        'userId', 'email', 'displayName', 'isOnline', 'lastActiveAt',
+        'deviceType'
+      ])
+      && ownsUserData(data)
+      && isOptionalString(data, 'email', 180)
+      && isOptionalString(data, 'displayName', 160)
+      && isOptionalBool(data, 'isOnline')
+      && isOptionalTimestamp(data, 'lastActiveAt')
+      && isOptionalString(data, 'deviceType', 40);
+    }
+
+    function hasDocumentShape(data) {
+      return data.keys().hasOnly([
+        'id', 'title', 'name', 'displayName', 'content', 'contentMarkdown',
+        'folderId', 'folderPath', 'fullPath', 'type', 'mimeType', 'tags',
+        'keywords', 'author', 'isPrivate', 'status', 'statusSync',
+        'syncStatus', 'icon', 'color', 'iconColor', 'sourceDocumentId',
+        'sourceContentId', 'relatedIds', 'publishedContentId',
+        'lastPublishedAt', 'createdBy', 'updatedBy', 'createdAt',
+        'updatedAt', 'deletedAt'
+      ])
+      && isString(data.title) && data.title.size() <= 180
+      && isOptionalString(data, 'content', 300000)
+      && isOptionalString(data, 'contentMarkdown', 300000)
+      && isOptionalString(data, 'folderId', 160)
+      && isOptionalString(data, 'folderPath', 800)
+      && isOptionalString(data, 'fullPath', 1000)
+      && isOptionalString(data, 'type', 80)
+      && isOptionalString(data, 'keywords', 1000)
+      && isOptionalString(data, 'author', 160)
+      && isOptionalBool(data, 'isPrivate')
+      && isOptionalList(data, 'tags', 30)
+      && isOptionalList(data, 'relatedIds', 100);
+    }
+
+    function hasFolderShape(data) {
+      return data.keys().hasOnly([
+        'id', 'title', 'name', 'parentId', 'icon', 'color', 'iconColor',
+        'order', 'folderPath', 'fullPath', 'isPrivate', 'author',
+        'createdBy', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'
+      ])
+      && isString(data.title) && data.title.size() <= 180
+      && isOptionalString(data, 'parentId', 160)
+      && isOptionalString(data, 'folderPath', 800)
+      && isOptionalString(data, 'fullPath', 1000)
+      && isOptionalString(data, 'author', 160)
+      && isOptionalBool(data, 'isPrivate');
+    }
+
+    match /ashramDocuments/{documentId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /ashramFolders/{folderId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /ashramDocumentVersions/{versionId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /documents/{documentId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /notas/{documentId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /archivosMarkdown/{documentId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /markdown/{documentId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /internalKnowledgeChunks/{chunkId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /config/{configId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /cursos/{courseId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /courses/{courseId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /meditaciones/{meditationId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /meditations/{meditationId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /biblioteca/{resourceId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /libros/{bookId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /articulos/{articleId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /bibliotecaRecursos/{resourceId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /enVivoMensajes/{messageId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          'uid', 'nombre', 'texto', 'rol', 'createdAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.texto is string
+        && request.resource.data.texto.size() <= 1000;
+      allow update, delete: if isAdmin();
+    }
+
+    match /analyticsEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if validAnalyticsEvent(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    match /userAnalytics/{userId} {
+      allow read: if isAdmin() || (signedIn() && userId == request.auth.uid);
+      allow create, update: if signedIn()
+        && userId == request.auth.uid
+        && validUserAnalytics(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /userPresence/{userId} {
+      allow read: if isAdmin() || (signedIn() && userId == request.auth.uid);
+      allow create, update: if signedIn()
+        && userId == request.auth.uid
+        && validPresence(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (signedIn() && userId == request.auth.uid);
+      allow create, update: if signedIn()
+        && userId == request.auth.uid
+        && validPresence(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /analyticsStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /contentStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /topicStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /keywordStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /searchStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /categoryStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /dailyInterestStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /ganeshaQuestionStats/{statId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /analyticsUserSeen/{userId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

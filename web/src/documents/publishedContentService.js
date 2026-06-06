@@ -6,12 +6,13 @@ const PUBLISHED_PATH = "publishedContent";
 export async function publishToFirebase(payload) {
   const { document, type, title, description, coverUrl, publicFileUrl, content } = payload;
   const now = new Date().toISOString();
-  const sourceDriveFileId = payload.sourceDriveFileId || document?.driveFileId || document?.sourceDriveFileId || "";
-  const existing = sourceDriveFileId && payload.publishMode !== "new" ? await findPublishedBySource(sourceDriveFileId, type) : null;
+  const sourceDocumentId = payload.sourceDocumentId || document?.id || "";
+  const sourceFolderId = payload.sourceFolderId || document?.folderId || "";
+  const existing = sourceDocumentId && payload.publishMode !== "new" ? await findPublishedBySource(sourceDocumentId, type) : null;
   const published = normalizePublishedContent({
     id: existing?.id,
-    sourceDriveFileId,
-    sourceDriveFolderId: payload.sourceDriveFolderId || document?.driveFolderId || document?.folderId || "",
+    sourceDocumentId,
+    sourceFolderId,
     type,
     title: title || document?.title || document?.name || "Sin titulo",
     subtitle: payload.subtitle,
@@ -19,7 +20,12 @@ export async function publishToFirebase(payload) {
     summary: payload.summary,
     content: content ?? document?.contentMarkdown ?? "",
     coverUrl,
+    imageUrl: payload.imageUrl || coverUrl,
+    imagen: payload.imageUrl || coverUrl,
+    imageStoragePath: payload.imageStoragePath,
     category: payload.category,
+    keywords: payload.keywords,
+    keywordList: payload.keywordList,
     tags: payload.tags,
     author: payload.author,
     publicFileUrl: publicFileUrl || document?.publicFileUrl || document?.webViewLink || "",
@@ -61,19 +67,19 @@ export async function unpublishContent(id) {
   await remove(ref(db, `${PUBLISHED_PATH}/${id}`));
 }
 
-async function findPublishedBySource(sourceDriveFileId, type) {
+async function findPublishedBySource(sourceDocumentId, type) {
   const snap = await get(ref(db, PUBLISHED_PATH));
   if (!snap.exists()) return null;
   const entries = Object.entries(snap.val() || {});
-  const found = entries.find(([, item]) => item.sourceDriveFileId === sourceDriveFileId && item.type === type);
+  const found = entries.find(([, item]) => item.sourceDocumentId === sourceDocumentId && item.type === type);
   return found ? { id: found[0], ...found[1] } : null;
 }
 
 function normalizePublishedContent(item) {
   return {
     id: item.id || "",
-    sourceDriveFileId: item.sourceDriveFileId || "",
-    sourceDriveFolderId: item.sourceDriveFolderId || "",
+    sourceDocumentId: item.sourceDocumentId || "",
+    sourceFolderId: item.sourceFolderId || "",
     type: item.type || "post",
     title: (item.title || "").trim(),
     subtitle: (item.subtitle || "").trim(),
@@ -81,7 +87,12 @@ function normalizePublishedContent(item) {
     summary: (item.summary || "").trim(),
     content: item.content || "",
     coverUrl: (item.coverUrl || "").trim(),
+    imageUrl: (item.imageUrl || item.coverUrl || item.imagen || "").trim(),
+    imagen: (item.imagen || item.imageUrl || item.coverUrl || "").trim(),
+    imageStoragePath: (item.imageStoragePath || item.imagen_path || "").trim(),
     category: (item.category || "").trim(),
+    keywords: (item.keywords || "").trim(),
+    keywordList: Array.isArray(item.keywordList) ? item.keywordList : [],
     tags: Array.isArray(item.tags) ? item.tags : [],
     author: (item.author || "").trim(),
     publicFileUrl: (item.publicFileUrl || "").trim(),

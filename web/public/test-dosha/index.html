@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test de Dosha | Ashram Ganesha</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="dosha-app">
+      <section class="hero" id="inicio">
+        <div class="brand">
+          <img src="../Logo Ashram.webp" alt="Ashram Ganesha" />
+          <span>Ashram Ganesha</span>
+        </div>
+        <div class="hero-content">
+          <p class="eyebrow">Ayurveda</p>
+          <h1>Test de Dosha</h1>
+          <p>
+            Evalua tu constitucion y tu estado actual segun Vata, Pitta y Kapha.
+            Responde desde lo que mas se parece a vos hoy.
+          </p>
+          <div class="hero-actions">
+            <button class="primary-button" type="button" id="startButton">Comenzar test</button>
+            <button class="ghost-button" type="button" id="viewSavedButton">Ver resultado guardado</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="saved-card hidden" id="savedNotice">
+        <div>
+          <strong>Hay un resultado guardado</strong>
+          <p>Podés verlo nuevamente o borrar el registro para hacer el test desde cero.</p>
+        </div>
+        <button class="ghost-button" type="button" id="clearSavedTopButton">Borrar resultado guardado</button>
+      </section>
+
+      <section class="test-shell hidden" id="testShell" aria-live="polite">
+        <header class="test-header">
+          <div>
+            <p class="eyebrow">Cuestionario</p>
+            <h2>Elegí la opción que más se parece a vos</h2>
+          </div>
+          <div class="progress-pill">
+            <span id="answeredCount">0</span>/<span id="totalCount">0</span>
+          </div>
+        </header>
+
+        <form id="doshaForm" class="question-list"></form>
+
+        <div class="test-actions">
+          <button class="primary-button" type="button" id="resultButton">Ver resultado</button>
+          <button class="ghost-button" type="button" id="resetButton">Reiniciar test</button>
+        </div>
+      </section>
+
+      <section class="result-card hidden" id="resultCard" aria-live="polite">
+        <p class="eyebrow">Resultado</p>
+        <h2 id="resultTitle">Tu dosha predominante</h2>
+
+        <div class="score-grid" id="scoreGrid"></div>
+
+        <div class="result-body">
+          <article>
+            <h3>Caracteristicas principales</h3>
+            <p id="traitsText"></p>
+          </article>
+          <article>
+            <h3>Posibles desequilibrios</h3>
+            <p id="imbalanceText"></p>
+          </article>
+          <article>
+            <h3>Recomendaciones basicas</h3>
+            <ul id="recommendationsList"></ul>
+          </article>
+        </div>
+
+        <div class="test-actions">
+          <button class="primary-button" type="button" id="restartFromResultButton">Reiniciar test</button>
+          <button class="ghost-button" type="button" id="clearSavedButton">Borrar resultado guardado</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>

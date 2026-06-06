@@ -1,5 +1,6 @@
 ﻿import {
   ArrowLeft,
+  BarChart3,
   BookOpen,
   CalendarDays,
   Eye,
@@ -10,6 +11,7 @@
   Newspaper,
   Pause,
   Play,
+  Search as SearchIcon,
   Send,
   Settings,
   Share2,
@@ -20,6 +22,7 @@
   GraduationCap,
   Headphones,
   ImageIcon,
+  Leaf,
   Library,
   LogOut,
   Minus,
@@ -59,7 +62,16 @@ import { deleteObject, ref as storageRef } from "firebase/storage";
 import { auth, db, firebaseConfig, firestoreDb, storage } from "./firebase";
 import BookStudio from "./BookStudio";
 import CuadernoAshram from "./CuadernoAshram";
+import GaneshaGuia from "./GaneshaGuia";
 import { parseEpubBuffer } from "./epubParser";
+import TestDosha from "./TestDosha";
+import {
+  trackContentOpen,
+  trackEvent,
+  trackGaneshaQuestion,
+  trackSearch,
+  startAnalyticsSession,
+} from "./analyticsService";
 import {
   cleanText,
   downloadUrl,
@@ -159,6 +171,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!authState.user) return undefined;
+    return startAnalyticsSession(authState.user, authState.profile || {});
+  }, [authState.user?.uid, authState.profile?.email, authState.profile?.nombre]);
+
+  useEffect(() => {
+    if (!authState.user || !view) return;
+    trackEvent("open_section", {
+      contentType: "section",
+      contentId: view,
+      contentTitle: sectionLabel(view),
+    });
+  }, [authState.user?.uid, view]);
+
+  useEffect(() => {
     if (authState.profile?.rol !== "admin") return undefined;
     let firstLoad = true;
     let previousLatest = {};
@@ -187,12 +213,23 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  useEffect(() => {
+    if (view !== "ganesha-guia") return;
+    window.history.replaceState({ view: "home" }, "", "#home");
+    setView("home");
+    window.setTimeout(() => window.dispatchEvent(new Event("open-ganesha-guia")), 0);
+  }, [view]);
+
   function notify(message) {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
   }
 
   function navigate(nextView) {
+    if (nextView === "ganesha-guia") {
+      window.dispatchEvent(new Event("open-ganesha-guia"));
+      return;
+    }
     if (nextView === view) return;
     if (isMainMenuSection(nextView) && !isMainMenuEnabled(menuConfig, nextView)) {
       notify("Esta seccion esta deshabilitada por administracion.");
@@ -274,6 +311,7 @@ export default function App() {
         {view === "en-vivo" && <EnVivo user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "sesiones" && <Sesiones user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
         {view === "tienda" && <Tienda user={authState.user} profile={authState.profile} onBack={() => navigate("home")} onToast={notify} />}
+        {view === "test-dosha" && <TestDosha onBack={() => navigate("home")} />}
         {view === "chat" && <Chat user={authState.user} profile={authState.profile} onBack={() => navigate("home")} />}
         {view === "admin" && (
           <Admin
@@ -297,6 +335,7 @@ export default function App() {
         {toast && <div className="toast">{toast}</div>}
         {shareDraft ? <SharePromoModal draft={shareDraft} onClose={() => setShareDraft(null)} onToast={notify} /> : null}
       </Shell>
+      <GaneshaGuia onNavigate={navigate} profile={authState.profile} />
       <InstallPrompt />
     </>
   );
@@ -605,6 +644,11 @@ function Home({ profile, menuConfig, setView }) {
             </button>
           );
         })}
+        <button className="module-tile" type="button" onClick={() => setView("test-dosha")}>
+          <Leaf size={34} />
+          <span className="module-title">Test de Dosha</span>
+          <small>Descubri tu equilibrio Vata, Pitta y Kapha.</small>
+        </button>
         <button className="module-tile muted" onClick={() => setView("perfil")}>
           <img className="module-icon" src="/icono_perfil.webp" alt="" />
           <span>Mi perfil</span>
@@ -1213,6 +1257,12 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
     loadList("biblioteca").then(setBooks);
   }, []);
 
+  useEffect(() => {
+    if (query.trim().length < 3) return undefined;
+    const timer = window.setTimeout(() => trackSearch(query, "biblioteca"), 900);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const filtered = books.filter((book) => (book.titulo || "").toLowerCase().includes(query.toLowerCase()));
 
   return (
@@ -1236,6 +1286,7 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
                       openAccessWhatsApp(profile, "biblioteca", book);
                       return;
                     }
+                    trackContentOpen("biblioteca", book);
                     setPdfViewer({ title: book.titulo || "Libro", url: book.pdf_url || book.pdf });
                   }}
                 >
@@ -1252,8 +1303,10 @@ function Biblioteca({ profile, onBack, onToast, onShare }) {
                       openAccessWhatsApp(profile, "biblioteca", book);
                       return;
                     }
+                    trackContentOpen("biblioteca", book);
                     setEpubViewer({
                       title: book.titulo || "Libro",
+                      author: book.autor || "",
                       url: book.epub_url || book.epub,
                       path: book.epub_path || "",
                       chapters: book.epub_chapters || [],
@@ -1334,11 +1387,18 @@ function Contenido({ coleccion, titulo, user, profile, onBack, onToast, onSubscr
   const freeId = items[0]?.id;
 
   function openDetail(item) {
+    trackContentOpen(coleccion, item);
     window.history.pushState({ detail: item.id }, "", `#${coleccion}/${item.id}`);
     setSelected(item);
   }
 
   function openCourse(tag) {
+    trackEvent("open_course", {
+      contentType: coleccion,
+      contentId: tag,
+      contentTitle: tag,
+      contentCategory: titulo,
+    });
     window.history.pushState({ course: tag }, "", `#${coleccion}/${encodeURIComponent(tag)}`);
     setSelectedCourse(tag);
   }
@@ -1502,6 +1562,11 @@ function DetalleModulo({ modulo, titulo, coleccion, profile, showSubscribe, onBa
   const embed = youtubeEmbedUrl(modulo.video);
   const itemTitle = contentTitle(modulo);
   const epubUrl = modulo.epub_url || modulo.epub;
+
+  useEffect(() => {
+    if (embed) trackContentOpen("video", modulo, { contentCategory: coleccion });
+  }, [modulo.id, embed]);
+
   return (
     <section className="content-page">
       <PageTitle icon={sectionIcon(coleccion)} iconSrc={sectionIconSrc(coleccion)} title={titulo} subtitle={sectionSubtitle(coleccion)} onBack={onBack} />
@@ -1540,13 +1605,17 @@ function DetalleModulo({ modulo, titulo, coleccion, profile, showSubscribe, onBa
           <button
             className="primary"
             type="button"
-            onClick={() => setEpubViewer({
-              title: itemTitle || "Material",
-              url: epubUrl,
-              path: modulo.epub_path || "",
-              chapters: modulo.epub_chapters || [],
-              epubTitle: modulo.epub_title || "",
-            })}
+            onClick={() => {
+              trackContentOpen("biblioteca", modulo, { contentTitle: itemTitle, contentCategory: coleccion });
+              setEpubViewer({
+                title: itemTitle || "Material",
+                author: modulo.autor || "",
+                url: epubUrl,
+                path: modulo.epub_path || "",
+                chapters: modulo.epub_chapters || [],
+                epubTitle: modulo.epub_title || "",
+              });
+            }}
           >
             <BookOpen size={18} /> Leer EPUB
           </button>
@@ -1592,8 +1661,10 @@ function CourseDetail({ coleccion, titulo, tag, modules, profile, onBack, onOpen
                     return;
                   }
                   if (itemEpubUrl) {
+                    trackContentOpen("biblioteca", item, { contentCategory: tag });
                     setEpubViewer({
                       title: contentTitle(item) || "Libro",
+                      author: item.autor || freeModule?.autor || "",
                       url: itemEpubUrl,
                       path: item.epub_path || "",
                       chapters: item.epub_chapters || [],
@@ -1744,6 +1815,7 @@ function Meditaciones({ user, profile, onBack, onToast, onShare }) {
       openAccessWhatsApp(profile, "meditaciones", item);
       return;
     }
+    trackContentOpen("meditaciones", item);
     window.history.pushState({ detail: item.id }, "", `#meditaciones/${item.id}`);
     setSelected(item);
   }
@@ -1816,6 +1888,12 @@ function MeditationDetail({ item, favorite, onBack, onFavorite, onShare }) {
           <SimpleAudioPlayer
             sources={audioSourceUrls(rawAudioUrl)}
             title={item.titulo || "Meditacion"}
+            onEnded={() => trackEvent("finish_meditation", {
+              contentType: "meditaciones",
+              contentId: item.id || "",
+              contentTitle: item.titulo || "Meditacion",
+              contentCategory: item.categoria || item.etiqueta || "",
+            })}
           />
         ) : (
           <p className="empty-state">Esta meditacion no tiene audio cargado.</p>
@@ -1836,7 +1914,7 @@ function MeditationDetail({ item, favorite, onBack, onFavorite, onShare }) {
   );
 }
 
-function SimpleAudioPlayer({ sources, title }) {
+function SimpleAudioPlayer({ sources, title, onEnded }) {
   const [audio, setAudio] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -1854,6 +1932,7 @@ function SimpleAudioPlayer({ sources, title }) {
     }
     function stopPlaying() {
       setPlaying(false);
+      onEnded?.();
     }
     function markFailed() {
       setPlaying(false);
@@ -1871,7 +1950,7 @@ function SimpleAudioPlayer({ sources, title }) {
       audio.removeEventListener("ended", stopPlaying);
       audio.removeEventListener("error", markFailed);
     };
-  }, [audio]);
+  }, [audio, onEnded]);
 
   async function togglePlay() {
     if (!audio) return;
@@ -1943,6 +2022,7 @@ function Blog({ user, profile, onBack, onShare }) {
   }, []);
 
   function openPost(post) {
+    trackContentOpen("blog", post);
     window.history.pushState({ detail: post.id }, "", `#blog/${post.id}`);
     setSelected(post);
   }
@@ -2215,7 +2295,7 @@ function Admin({ profile, menuConfig, onToast, onBack }) {
   const dataPath = adminDataPath(section);
 
   useEffect(() => {
-    if (section === "cuaderno" || section === "libros" || section === "configuracion") {
+    if (section === "cuaderno" || section === "libros" || section === "configuracion" || section === "analiticas") {
       setItems([]);
       return;
     }
@@ -2223,12 +2303,12 @@ function Admin({ profile, menuConfig, onToast, onBack }) {
   }, [section]);
 
   async function refresh() {
-    if (section === "cuaderno" || section === "libros" || section === "configuracion") return;
+    if (section === "cuaderno" || section === "libros" || section === "configuracion" || section === "analiticas") return;
     setItems(await loadList(dataPath));
   }
 
   async function deleteItem(item) {
-    const label = section === "tienda" ? productName(item) : contentTitle(item);
+    const label = section === "tienda" ? productName(item) : section === "ganesha-guia-knowledge" ? ganeshaKnowledgeTitle(item) : contentTitle(item);
     if (!window.confirm(`Borrar "${label || "item"}"?`)) return;
     await remove(ref(db, `${dataPath}/${item.id}`));
     await deleteStoragePath(item.portada_path || item.imagen_path);
@@ -2248,7 +2328,7 @@ function Admin({ profile, menuConfig, onToast, onBack }) {
           </button>
         ))}
       </div>
-      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" ? (
+      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "analiticas" ? (
         <button className="primary" onClick={() => setEditing({})}>
           <Plus size={18} /> Nuevo
         </button>
@@ -2265,7 +2345,19 @@ function Admin({ profile, menuConfig, onToast, onBack }) {
           onToast={onToast}
         />
       ) : null}
-      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "tienda" && (
+      {editing && section === "ganesha-guia-knowledge" ? (
+        <GaneshaKnowledgeForm
+          item={editing}
+          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            refresh();
+            onToast("Conocimiento de Ganesha Guia guardado.");
+          }}
+          onToast={onToast}
+        />
+      ) : null}
+      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "analiticas" && section !== "tienda" && section !== "ganesha-guia-knowledge" && (
         <AdminForm
           key={`${section}-${editing.id || "new"}`}
           section={section}
@@ -2283,6 +2375,10 @@ function Admin({ profile, menuConfig, onToast, onBack }) {
       )}
       {section === "configuracion" ? (
         <MenuSettingsAdmin menuConfig={menuConfig} onToast={onToast} />
+      ) : section === "analiticas" ? (
+        <p className="empty-state">Analiticas desactivadas temporalmente para restaurar Cuadernos.</p>
+      ) : section === "ganesha-guia-knowledge" ? (
+        <GaneshaKnowledgeAdmin items={items} onEdit={setEditing} onDelete={deleteItem} />
       ) : section === "cuaderno" ? (
         <CuadernoAshram
           profile={profile}
@@ -2324,6 +2420,7 @@ function Admin({ profile, menuConfig, onToast, onBack }) {
                 <strong>{section === "tienda" ? productName(item) : contentTitle(item)}</strong>
                 <small>{section === "tienda" ? `${formatMoney(productPrice(item))} - Stock: ${item.stock ?? 0} - ${item.activo === false ? "Oculto" : "Visible"}` : section === "satsang" ? "Satsang" : item.categoria || item.etiqueta || "Sin categoria"}</small>
                 {section === "tienda" && item.categoria ? <em>{item.categoria}</em> : null}
+                {contentKeywords(item) ? <em>Palabras clave: {contentKeywords(item)}</em> : null}
               </span>
               <button className="icon-btn" type="button" title="Editar" onClick={() => setEditing(item)}><Pencil size={18} /></button>
               <button className="icon-btn danger" type="button" title="Borrar" onClick={() => deleteItem(item)}><Trash2 size={18} /></button>
@@ -2384,7 +2481,340 @@ function MenuSettingsAdmin({ menuConfig, onToast }) {
           );
         })}
       </div>
+      <section className="internal-knowledge-sync">
+        <span>
+          <strong>Conocimiento interno de Ganesha Guia</strong>
+          <small>
+            Ganesha consulta directamente Firestore: ashramDocuments y los
+            recursos publicos del Ashram.
+          </small>
+        </span>
+      </section>
     </div>
+  );
+}
+
+function AnalyticsDashboard() {
+  const [overview, setOverview] = useState({});
+  const [contentStats, setContentStats] = useState([]);
+  const [topicStats, setTopicStats] = useState([]);
+  const [keywordStats, setKeywordStats] = useState([]);
+  const [searchStats, setSearchStats] = useState([]);
+  const [categoryStats, setCategoryStats] = useState([]);
+  const [questionStats, setQuestionStats] = useState([]);
+  const [dailyStats, setDailyStats] = useState([]);
+  const [diagnostics, setDiagnostics] = useState(null);
+  const [diagnosticsError, setDiagnosticsError] = useState("");
+
+  useEffect(() => {
+    const unsubscribers = [
+      onSnapshot(doc(firestoreDb, "analyticsStats", "overview"), (snap) => setOverview(snap.data() || {}), analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "contentStats"), orderBy("count", "desc"), limit(40)), (snap) => {
+        setContentStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+      }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "topicStats"), orderBy("count", "desc"), limit(20)), (snap) => {
+        setTopicStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+      }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "keywordStats"), orderBy("count", "desc"), limit(20)), (snap) => {
+        setKeywordStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+      }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "searchStats"), orderBy("count", "desc"), limit(20)), (snap) => {
+        setSearchStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+      }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "categoryStats"), orderBy("count", "desc"), limit(20)), (snap) => {
+        setCategoryStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+      }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "ganeshaQuestionStats"), orderBy("count", "desc"), limit(20)), (snap) => {
+        setQuestionStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+      }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "dailyInterestStats"), orderBy("dateKey", "desc"), limit(7)), (snap) => {
+        setDailyStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })).reverse());
+      }, analyticsReadError(setDiagnosticsError)),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, []);
+
+  useEffect(() => {
+    loadAnalyticsDiagnostics().then(setDiagnostics).catch((error) => {
+      setDiagnosticsError(error.message || "No se pudo leer diagnostico.");
+    });
+  }, []);
+
+  const posts = contentStats.filter((item) => item.contentType === "blog" || item.eventType === "open_post").slice(0, 5);
+  const courses = contentStats.filter((item) => ["conocimiento", "ejercicios", "course"].includes(item.contentType) || item.eventType === "open_course").slice(0, 5);
+  const meditations = contentStats.filter((item) => item.contentType === "meditaciones" || item.eventType === "open_meditation").slice(0, 5);
+  const books = contentStats.filter((item) => item.contentType === "biblioteca" || item.eventType === "open_book").slice(0, 5);
+  const articles = contentStats.filter((item) => item.eventType === "open_article").slice(0, 5);
+  const suggestions = buildCommunitySuggestions(topicStats, categoryStats);
+
+  return (
+    <div className="analytics-dashboard">
+      <header className="admin-list-head">
+        <strong>Intereses de la comunidad</strong>
+        <small>Estadisticas generales y anonimas para crear mejores contenidos, cursos y meditaciones.</small>
+      </header>
+      <div className="analytics-kpi-grid">
+        <AnalyticsKpi icon={Heart} label="Temas detectados" value={topicStats.length} />
+        <AnalyticsKpi icon={SearchIcon} label="Busquedas registradas" value={overview.search_content || 0} />
+        <AnalyticsKpi icon={MessageCircle} label="Preguntas a Ganesha" value={overview.ask_ganesha || 0} />
+        <AnalyticsKpi icon={ActivityIcon} label="Eventos comunitarios" value={overview.totalEvents || 0} />
+      </div>
+      <section className="analytics-privacy-note">
+        El Ashram utiliza estadisticas generales y anonimas para comprender que contenidos son mas utiles y mejorar la experiencia de la comunidad.
+      </section>
+      <AnalyticsDiagnostics diagnostics={diagnostics} error={diagnosticsError} />
+      <div className="analytics-grid">
+        <AnalyticsRanking title="Temas mas consultados" icon={Heart} items={topicStats.slice(0, 10)} />
+        <AnalyticsRanking title="Palabras mas buscadas" icon={SearchIcon} items={searchStats.slice(0, 10)} />
+        <AnalyticsRanking title="Preguntas frecuentes a Ganesha" icon={MessageCircle} items={questionStats.slice(0, 10)} />
+        <AnalyticsRanking title="Categorias con mas interes" icon={Leaf} items={categoryStats.slice(0, 10)} />
+      </div>
+      <section className="analytics-card analytics-wide">
+        <div className="admin-list-head">
+          <strong>Tendencias de los ultimos 7 dias</strong>
+          <small>Movimiento general de la comunidad, sin datos personales.</small>
+        </div>
+        <AnalyticsTrend items={dailyStats} />
+      </section>
+      <div className="analytics-grid">
+        <AnalyticsRanking title="Libros mas consultados" icon={BookOpen} items={books} />
+        <AnalyticsRanking title="Cursos mas visitados" icon={GraduationCap} items={courses} />
+        <AnalyticsRanking title="Meditaciones mas escuchadas" icon={Headphones} items={meditations} />
+        <AnalyticsRanking title="Posts mas leidos" icon={Newspaper} items={posts} />
+        <AnalyticsRanking title="Articulos mas leidos" icon={Library} items={articles} />
+        <AnalyticsRanking title="Palabras clave recurrentes" icon={BarChart3} items={keywordStats.slice(0, 10)} />
+      </div>
+      <AnalyticsSuggestions items={suggestions} />
+    </div>
+  );
+}
+
+function AnalyticsKpi({ icon: Icon, label, value }) {
+  return (
+    <article className="analytics-kpi">
+      <Icon size={20} />
+      <span>
+        <strong>{value}</strong>
+        <small>{label}</small>
+      </span>
+    </article>
+  );
+}
+
+function AnalyticsRanking({ title, icon: Icon, items }) {
+  return (
+    <section className="analytics-card">
+      <h2><Icon size={18} /> {title}</h2>
+      <div className="analytics-ranking">
+        {items.length === 0 ? <p className="empty-state">Sin datos todavia.</p> : null}
+        {items.map((item) => (
+          <article key={item.id}>
+            <span>
+              <strong>{analyticsItemTitle(item)}</strong>
+              <small>{item.category || item.contentType || item.eventType || "Ashram"}</small>
+            </span>
+            <em>{item.count || 0}</em>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsTrend({ items }) {
+  if (!items.length) return <p className="empty-state">Sin tendencias todavia.</p>;
+  const max = Math.max(...items.map((item) => Number(item.totalEvents || 0)), 1);
+  return (
+    <div className="analytics-trend">
+      {items.map((item) => {
+        const value = Number(item.totalEvents || 0);
+        return (
+          <article key={item.id}>
+            <span>{item.dateKey || item.id}</span>
+            <div><i style={{ width: `${Math.max(8, (value / max) * 100)}%` }} /></div>
+            <strong>{value}</strong>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function AnalyticsSuggestions({ items }) {
+  return (
+    <section className="analytics-card analytics-wide">
+      <h2><Leaf size={18} /> Sugerencias de contenido</h2>
+      <div className="analytics-suggestions">
+        {items.length === 0 ? <p className="empty-state">Cuando haya mas actividad, apareceran sugerencias para crear nuevo contenido.</p> : null}
+        {items.map((item) => <article key={item}>{item}</article>)}
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsDiagnostics({ diagnostics, error }) {
+  const counts = diagnostics?.counts || {};
+  return (
+    <section className="analytics-card analytics-wide analytics-diagnostics">
+      <h2><BarChart3 size={18} /> Diagnostico temporal</h2>
+      {error ? <p className="player-error">{error}</p> : null}
+      {!diagnostics && !error ? <p className="empty-state">Leyendo diagnostico de Firestore...</p> : null}
+      {diagnostics ? (
+        <>
+          <div className="analytics-diagnostics-grid">
+            <span>analyticsEvents: <strong>{counts.analyticsEvents || 0}</strong></span>
+            <span>topicStats: <strong>{counts.topicStats || 0}</strong></span>
+            <span>contentStats: <strong>{counts.contentStats || 0}</strong></span>
+            <span>userPresence: <strong>{counts.userPresence || 0}</strong></span>
+            <span>users: <strong>{counts.users || 0}</strong></span>
+          </div>
+          <small>
+            Ultimo evento: {diagnostics.latestEvent?.eventType || "sin eventos"} - {diagnostics.latestEvent?.contentType || "Ashram"}.
+            Ultima presencia: {diagnostics.latestPresence?.isOnline ? "activa" : "sin actividad visible"}.
+          </small>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function analyticsItemTitle(item = {}) {
+  return item.title || item.question || item.searchQuery || item.topic || item.keyword || item.category || "Sin titulo";
+}
+
+function buildCommunitySuggestions(topics = [], categories = []) {
+  const mainTopics = topics.slice(0, 4).map(analyticsItemTitle).filter(Boolean);
+  const mainCategory = analyticsItemTitle(categories[0] || {});
+  if (!mainTopics.length) return [];
+  const [first, second = "meditacion", third = "respiracion"] = mainTopics;
+  return [
+    `Crear un post sobre ${first}${second ? ` y ${second}` : ""}.`,
+    `Crear una meditacion guiada relacionada con ${first}.`,
+    `Preparar una clase sobre ${third} aplicada a ${first}.`,
+    mainCategory && mainCategory !== "Sin titulo" ? `Reforzar la categoria ${mainCategory} con nuevo material practico.` : "",
+  ].filter(Boolean);
+}
+
+function ActivityIcon(props) {
+  return <BarChart3 {...props} />;
+}
+
+function analyticsReadError(setError) {
+  return (error) => {
+    console.warn("No se pudo leer analiticas", error);
+    setError(error.message || "No se pudo leer analiticas.");
+  };
+}
+
+async function loadAnalyticsDiagnostics() {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Necesitas iniciar sesion para leer diagnostico.");
+  const token = await user.getIdToken();
+  const response = await fetch("/api/analytics-diagnostics", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "No se pudo leer diagnostico.");
+  return body;
+}
+
+function GaneshaKnowledgeAdmin({ items, onEdit, onDelete }) {
+  const sorted = [...items].sort((a, b) => Number(b.priority || b.prioridad || 0) - Number(a.priority || a.prioridad || 0));
+
+  return (
+    <div className="list ganesha-admin-list">
+      <header className="admin-list-head">
+        <strong>Conocimiento de Ganesha Guia</strong>
+        <small>Base prioritaria que el asistente consulta antes que el resto del Ashram.</small>
+      </header>
+      {sorted.length === 0 ? <p className="empty-state">Todavia no hay conocimiento cargado para Ganesha Guia.</p> : null}
+      {sorted.map((item) => (
+        <article className="admin-row" key={item.id}>
+          <span className={`knowledge-status-dot ${item.active === false ? "inactive" : "active"}`} />
+          <span>
+            <strong>{item.title || item.titulo || "Sin titulo"}</strong>
+            <small>{item.category || item.categoria || "Sin categoria"} - Prioridad {item.priority || item.prioridad || 0} - {item.active === false ? "Inactivo" : "Activo"}</small>
+            <em>{item.topic || item.pregunta || item.tema || "Sin tema"}</em>
+            {contentKeywords(item) ? <em>Palabras clave: {contentKeywords(item)}</em> : null}
+          </span>
+          <button className="icon-btn" type="button" title="Editar" onClick={() => onEdit(item)}><Pencil size={18} /></button>
+          <button className="icon-btn danger" type="button" title="Borrar" onClick={() => onDelete(item)}><Trash2 size={18} /></button>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function GaneshaKnowledgeForm({ item, onCancel, onSaved, onToast }) {
+  const [form, setForm] = useState({
+    title: item.title || item.titulo || "",
+    category: item.category || item.categoria || "",
+    topic: item.topic || item.pregunta || item.tema || "",
+    answer: item.answer || item.respuesta || "",
+    keywords: contentKeywords(item),
+    phrase: item.phrase || item.frase || "",
+    active: item.active !== false,
+    priority: item.priority || item.prioridad || 0,
+  });
+  const [busy, setBusy] = useState(false);
+
+  function setField(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    if (!cleanText(form.title)) return onToast("Completa el titulo.");
+    if (!cleanText(form.topic)) return onToast("Completa la pregunta o tema.");
+    if (!cleanText(form.answer)) return onToast("Completa la respuesta base.");
+    setBusy(true);
+    try {
+      const data = {
+        title: cleanText(form.title),
+        category: cleanText(form.category),
+        topic: cleanText(form.topic),
+        answer: cleanText(form.answer),
+        keywords: cleanText(form.keywords),
+        phrase: cleanText(form.phrase),
+        active: Boolean(form.active),
+        priority: Number(form.priority) || 0,
+        updatedAt: new Date().toISOString(),
+      };
+      if (item.id) {
+        await update(ref(db, `ganeshaKnowledge/${item.id}`), data);
+      } else {
+        await push(ref(db, "ganeshaKnowledge"), {
+          ...data,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      onSaved();
+    } catch (error) {
+      onToast(error.message || "No se pudo guardar el conocimiento.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="admin-form ganesha-knowledge-form" onSubmit={save}>
+      <div className="form-head">
+        <h2>{item.id ? "Editar conocimiento" : "Nuevo conocimiento"}</h2>
+        <button className="icon-btn" type="button" onClick={onCancel}><X size={18} /></button>
+      </div>
+      <label>Titulo<input value={form.title} onChange={(event) => setField("title", event.target.value)} /></label>
+      <label>Categoria<input value={form.category} onChange={(event) => setField("category", event.target.value)} placeholder="Ej: Ayurveda, meditacion, funcionamiento del Ashram" /></label>
+      <label>Pregunta o tema<input value={form.topic} onChange={(event) => setField("topic", event.target.value)} placeholder="Ej: como calmar la ansiedad" /></label>
+      <label>Respuesta base<textarea value={form.answer} onChange={(event) => setField("answer", event.target.value)} placeholder="Texto breve que Ganesha resumira al responder" /></label>
+      <label>Palabras clave<input value={form.keywords} onChange={(event) => setField("keywords", event.target.value)} placeholder="Ej: ansiedad, vata, calma, respiracion, Ganesha" /></label>
+      <label>Frase espiritual opcional<input value={form.phrase} onChange={(event) => setField("phrase", event.target.value)} placeholder="Ej: Respira. El centro siempre esta cerca." /></label>
+      <label>Prioridad<input type="number" value={form.priority} onChange={(event) => setField("priority", event.target.value)} /></label>
+      <label className="check-row">
+        <input type="checkbox" checked={form.active} onChange={(event) => setField("active", event.target.checked)} />
+        Activo
+      </label>
+      <button className="primary" disabled={busy}>{busy ? "Guardando..." : "Guardar conocimiento"}</button>
+    </form>
   );
 }
 
@@ -2720,6 +3150,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
     blog_id: item.blog_id || item.blogId || item.post_id || item.postId || "",
     detalle: item.detalle || "",
     link_drive: item.link_drive || "",
+    keywords: contentKeywords(item),
     acceso: item.acceso || item.tipo_acceso || "gratis",
     curso_acceso: item.curso_acceso || item.acceso_curso || "suscripcion",
   });
@@ -2748,7 +3179,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
     if (!isKnowledge && !isBanner && !isMeditation && !isSatsang && !cleanText(form.categoria)) return onToast(isBook ? "Completa la categoria." : "Completa la etiqueta.");
     if (isBanner && !cleanText(form.blog_id)) return onToast("Selecciona el post del blog.");
     const existingAudio = item.audio_url || item.link_audio || item.audio || item.link_drive;
-    if (isMeditation && !audioFile && !cleanText(form.link_drive) && !existingAudio) return onToast("Subi el audio M4A o completa el link de Google Drive.");
+    if (isMeditation && !audioFile && !cleanText(form.link_drive) && !existingAudio) return onToast("Subi el audio M4A o completa una URL de audio.");
     if (!isKnowledge && !isSatsang && !image && !(item.portada_url || item.imagen)) return onToast("Selecciona una imagen.");
     if (!isKnowledge && includePdf && !pdf && !epub && !(item.pdf_url || item.pdf || item.epub_url || item.epub)) return onToast(isBook ? "Selecciona un PDF o EPUB." : "Selecciona un PDF.");
 
@@ -2757,6 +3188,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
       const data = {
         titulo: cleanText(form.titulo),
         descripcion: cleanText(form.descripcion),
+        keywords: cleanText(form.keywords),
         fecha_creacion: item.fecha_creacion || new Date().toISOString(),
       };
 
@@ -2881,6 +3313,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
       </div>
       <label>{isSatsang ? "Tema" : "Titulo"}<input value={form.titulo} onChange={(e) => setField("titulo", e.target.value)} /></label>
       {!isBanner ? <label>Descripcion<textarea value={form.descripcion} onChange={(e) => setField("descripcion", e.target.value)} /></label> : null}
+      <label>Palabras clave<input value={form.keywords} onChange={(e) => setField("keywords", e.target.value)} placeholder="Ej: ansiedad, vata, calma, respiración, Ganesha" /></label>
       {hasAccessMode ? (
         <label>Tipo de acceso
           <select value={form.acceso} onChange={(e) => setField("acceso", e.target.value)}>
@@ -2913,7 +3346,7 @@ function AdminForm({ section, item, onCancel, onSaved, onToast }) {
         </label>
       ) : null}
       {isBook ? <label>Autor<input value={form.autor} onChange={(e) => setField("autor", e.target.value)} /></label> : null}
-      {isMeditation ? <label>Link Google Drive M4A<input value={form.link_drive} onChange={(e) => setField("link_drive", e.target.value)} /></label> : null}
+      {isMeditation ? <label>URL de audio M4A<input value={form.link_drive} onChange={(e) => setField("link_drive", e.target.value)} /></label> : null}
       {!isBook && !isBlog && !isBanner && !isMeditation ? <label>Link video YouTube<input value={form.video} onChange={(e) => setField("video", e.target.value)} /></label> : null}
       {!isSatsang ? <FileInput icon={ImageIcon} label="Imagen" file={image} accept="image/jpeg,image/png,image/webp" onChange={setImage} /> : null}
       {isMeditation ? <FileInput icon={Upload} label="Audio M4A" file={audioFile} accept="audio/mp4,audio/x-m4a,.m4a" onChange={setAudioFile} /> : null}
@@ -3130,6 +3563,7 @@ function ProductAdminForm({ item, onCancel, onSaved, onToast }) {
     precio: item.precio || "",
     stock: item.stock ?? "",
     categoria: item.categoria || "",
+    keywords: contentKeywords(item),
     activo: item.activo !== false,
   });
   const [image, setImage] = useState(null);
@@ -3153,6 +3587,7 @@ function ProductAdminForm({ item, onCancel, onSaved, onToast }) {
         precio: toNumber(form.precio),
         stock: Math.max(0, Math.trunc(toNumber(form.stock))),
         categoria: cleanText(form.categoria),
+        keywords: cleanText(form.keywords),
         activo: Boolean(form.activo),
         fecha_creacion: item.fecha_creacion || new Date().toISOString(),
       };
@@ -3190,6 +3625,7 @@ function ProductAdminForm({ item, onCancel, onSaved, onToast }) {
       <label>Precio<input inputMode="decimal" value={form.precio} onChange={(event) => setField("precio", event.target.value)} /></label>
       <label>Stock<input type="number" min="0" value={form.stock} onChange={(event) => setField("stock", event.target.value)} /></label>
       <label>Categoria<input value={form.categoria} onChange={(event) => setField("categoria", event.target.value)} /></label>
+      <label>Palabras clave<input value={form.keywords} onChange={(event) => setField("keywords", event.target.value)} placeholder="Ej: ansiedad, vata, calma, respiración, Ganesha" /></label>
       <label className="check-row">
         <input type="checkbox" checked={form.activo} onChange={(event) => setField("activo", event.target.checked)} />
         Producto activo
@@ -3358,6 +3794,15 @@ function contentTitle(item) {
   return cleanText(item?.tema) || cleanText(item?.titulo) || "Sin titulo";
 }
 
+function ganeshaKnowledgeTitle(item) {
+  return cleanText(item?.title) || cleanText(item?.titulo) || "Sin titulo";
+}
+
+function contentKeywords(item) {
+  const keywords = item?.keywords || item?.palabras_clave || item?.palabrasClave || item?.keywordList || item?.tags || "";
+  return Array.isArray(keywords) ? keywords.join(", ") : cleanText(keywords);
+}
+
 function sectionConfig(id) {
   return sections.find((section) => section.id === id) || adminSections.find((section) => section.id === id);
 }
@@ -3381,7 +3826,9 @@ function isMainMenuEnabled(menuConfig, id) {
 }
 
 function adminDataPath(section) {
-  return section === "tienda" ? "productos" : section;
+  if (section === "tienda") return "productos";
+  if (section === "ganesha-guia-knowledge") return "ganeshaKnowledge";
+  return section;
 }
 
 function sectionIcon(id) {
@@ -3390,6 +3837,14 @@ function sectionIcon(id) {
 
 function sectionIconSrc(id) {
   return sectionConfig(id)?.iconSrc || "";
+}
+
+function sectionLabel(id) {
+  if (id === "admin") return "Administracion";
+  if (id === "perfil") return "Perfil";
+  if (id === "chat") return "Chat";
+  if (id === "test-dosha") return "Test Dosha";
+  return sectionConfig(id)?.label || id;
 }
 
 function sectionSubtitle(id) {
@@ -3405,6 +3860,32 @@ function sectionSubtitle(id) {
     chat: "Un canal directo para acompanarte.",
   };
   return subtitles[id] || "";
+}
+
+function isPresenceOnline(item = {}) {
+  if (!item.isOnline) return false;
+  const date = firestoreDate(item.lastActiveAt);
+  if (!date) return false;
+  return Date.now() - date.getTime() < 5 * 60 * 1000;
+}
+
+function firestoreDate(value) {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate();
+  if (value.seconds) return new Date(value.seconds * 1000);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatFirestoreDate(value) {
+  const date = firestoreDate(value);
+  if (!date) return "sin fecha";
+  return date.toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function liveEmbedUrl(value) {

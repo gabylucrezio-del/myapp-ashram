@@ -1,4 +1,4 @@
-import { Check, ExternalLink, Image, Link2, Menu, Minimize2, MoreVertical, Save, Share2, Undo2 } from "lucide-react";
+import { Check, ExternalLink, Image, Link2, Menu, Minimize2, MoreVertical, Save, Share2, Sparkles, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import BookModeToolbar from "./BookModeToolbar";
 import ChapterPreview from "./ChapterPreview";
@@ -10,6 +10,7 @@ import PostExportModal from "./PostExportModal";
 import PublishModal from "./PublishModal";
 import StableMarkdownEditor from "./StableMarkdownEditor";
 import { iconFor } from "./documentIcons";
+import { DOCUMENT_AI_ACTIONS, transformDocumentWithAi } from "./documentAiService";
 import { detectChapters, exportMarkdown } from "./exportService";
 
 export default function DocumentEditor({
@@ -22,12 +23,10 @@ export default function DocumentEditor({
   onShowSidebar,
   onUploadImage,
   onCreateLinkedDocument,
+  onCreateAiDocument,
   onOpenDocument,
   onOpenStorageConfig,
   onRefreshTree,
-  onBackupDrive,
-  onRestoreDrive,
-  driveConnected = false,
   busy = false,
   internalDocuments = [],
 }) {
@@ -35,6 +34,7 @@ export default function DocumentEditor({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [mobileExportMenuOpen, setMobileExportMenuOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [mobileAiOpen, setMobileAiOpen] = useState(false);
   const [exportModal, setExportModal] = useState("");
   const [publishSeedDocument, setPublishSeedDocument] = useState(null);
   const [showChapters, setShowChapters] = useState(false);
@@ -45,11 +45,14 @@ export default function DocumentEditor({
   const [linkSearch, setLinkSearch] = useState("");
   const [history, setHistory] = useState([]);
   const [saveStatus, setSaveStatus] = useState("idle");
+  const [aiBusyAction, setAiBusyAction] = useState("");
+  const [aiStatus, setAiStatus] = useState(null);
   const textareaRef = useRef(null);
   const visualEditorRef = useRef(null);
   const stableEditorRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const autoSaveReadyRef = useRef(false);
   const markdownDocuments = useMemo(
     () => internalDocuments.length ? internalDocuments : getAllMarkdownDocumentsFromTree(documents, folders),
     [documents, folders, internalDocuments],
@@ -58,6 +61,7 @@ export default function DocumentEditor({
   useEffect(() => {
     setDraft(document);
     setSaveStatus("idle");
+    autoSaveReadyRef.current = false;
   }, [document?.id]);
 
   useEffect(() => {
@@ -73,6 +77,18 @@ export default function DocumentEditor({
     if (!visualEditorRef.current || !document?.id) return;
     visualEditorRef.current.innerHTML = markdownToHtml(document.contentMarkdown || "");
   }, [document?.id]);
+
+  useEffect(() => {
+    if (!draft?.id || draft.editable === false) return undefined;
+    if (!autoSaveReadyRef.current) {
+      autoSaveReadyRef.current = true;
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      saveCurrentDocument({ silent: true });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [draft?.title, draft?.folderId, draft?.contentMarkdown]);
 
   useEffect(() => {
     if (editorMode !== "visual" || !visualEditorRef.current) return;
@@ -111,11 +127,9 @@ export default function DocumentEditor({
     const latestMarkdown = editorMode === "visual"
       ? stableEditorRef.current?.getMarkdown?.() ?? draft.contentMarkdown ?? ""
       : draft.contentMarkdown || "";
-    const targetDriveFileId = draft.driveFileId || draft.driveId || draft.id;
     const nextDraft = {
       ...draft,
       id: draft.id,
-      driveFileId: targetDriveFileId,
       contentMarkdown: latestMarkdown,
     };
     setDraft(nextDraft);
@@ -132,6 +146,17 @@ export default function DocumentEditor({
       if (!silent) setSaveStatus("error");
       return false;
     }
+  }
+
+  function currentDraftWithEditorContent() {
+    const latestMarkdown = editorMode === "visual"
+      ? stableEditorRef.current?.getMarkdown?.() ?? draft.contentMarkdown ?? ""
+      : draft.contentMarkdown || "";
+    return {
+      ...draft,
+      contentMarkdown: latestMarkdown,
+      content: latestMarkdown,
+    };
   }
 
   function insertSnippet(snippet) {
@@ -222,7 +247,7 @@ export default function DocumentEditor({
   }
 
   function insertImageBlock() {
-    const url = window.prompt("URL de imagen de Google Drive o externa");
+    const url = window.prompt("URL de imagen externa o de la biblioteca");
     if (!url) return;
     const alt = window.prompt("Texto alternativo", "") || "";
     const caption = window.prompt("Pie de imagen", "") || "";
@@ -233,7 +258,7 @@ export default function DocumentEditor({
   }
 
   function insertVideoBlock() {
-    const url = window.prompt("URL de YouTube, Vimeo, Google Drive o video externo");
+    const url = window.prompt("URL de YouTube, Vimeo o video externo");
     if (!url) return;
     const html = `<div class="video-block"><iframe src="${escapeHtml(videoEmbedUrl(url))}" allowfullscreen></iframe></div><p><br></p>`;
     insertMarkdownAtCursor(`\n${html}\n\n`);
@@ -299,6 +324,57 @@ export default function DocumentEditor({
     await onPublish?.({ document: draft, ...data });
   }
 
+  async function runAiAction(actionConfig) {
+    if (!draft?.id) return;
+    setMobileAiOpen(false);
+    const sourceDraft = currentDraftWithEditorContent();
+    setDraft(sourceDraft);
+    const saved = await saveCurrentDocument({ silent: true });
+    if (!saved) return;
+    setAiBusyAction(actionConfig.id);
+    setAiStatus({
+      phase: "loading",
+      message: "Consultando la sabiduría del Ashram...",
+      actionConfig,
+    });
+    try {
+      const result = await transformDocumentWithAi({
+        action: actionConfig.id,
+        document: sourceDraft,
+        onStatus: (status) => setAiStatus({ ...status, actionConfig }),
+      });
+      const seedDocument = {
+        ...sourceDraft,
+        title: result.title || `${actionConfig.label}: ${sourceDraft.title || "Documento"}`,
+        contentMarkdown: result.content || "",
+        content: result.content || "",
+        summary: result.summary || "",
+        tags: result.tags || [],
+        keywords: Array.isArray(result.tags) ? result.tags.join(", ") : "",
+        sourceDocumentId: sourceDraft.id,
+        sourceFolderId: sourceDraft.folderId || "",
+      };
+      if (actionConfig.target === "publish") {
+        setPublishSeedDocument(seedDocument);
+        setExportModal(`publish_${actionConfig.publishType || "post"}`);
+        setAiStatus(null);
+        return;
+      }
+      await onCreateAiDocument?.(seedDocument);
+      setAiStatus(null);
+    } catch (error) {
+      console.error("No se pudo transformar el documento con IA", error);
+      setAiStatus({
+        phase: "error",
+        message: error.message || "No se pudo crear el borrador con IA.",
+        retryable: Boolean(error.isRetryable),
+        actionConfig,
+      });
+    } finally {
+      setAiBusyAction("");
+    }
+  }
+
   function openPublishFromEpub(payload) {
     const nextDocument = {
       ...draft,
@@ -315,6 +391,7 @@ export default function DocumentEditor({
         title: payload.title || draft.title || "",
         author: payload.author || "Ashram Ganesha",
         description: payload.description || "",
+        keywords: payload.keywords || "",
         coverUrl: payload.coverUrl || "",
         publicFileUrl: payload.uploaded?.url || "",
         format: "epub",
@@ -415,7 +492,7 @@ export default function DocumentEditor({
       return;
     }
     const target = documentItem;
-    const linkId = target.driveFileId || target.driveId || target.id;
+    const linkId = target.id;
     const title = cleanDocumentTitle(target);
     insertMarkdownAtCursor(`[[${linkId}|${title}]]`);
     setLinkModal("");
@@ -444,7 +521,7 @@ export default function DocumentEditor({
     if (!window.confirm(`Crear el documento "${cleanTitle}" en la carpeta actual?`)) return;
     const target = await onCreateLinkedDocument?.(cleanTitle);
     if (!target) return;
-    const linkId = target.driveFileId || target.driveId || target.id;
+    const linkId = target.id;
     const visibleTitle = cleanDocumentTitle(target);
     const oldToken = `[[${cleanTitle}]]`;
     const oldPendingToken = `[[new:${cleanTitle}]]`;
@@ -470,7 +547,7 @@ export default function DocumentEditor({
   async function openNamedInternalLink(title) {
     const existing = findDocumentByTitle(title);
     if (existing) {
-      openInternalDocument(existing.driveFileId || existing.driveId || existing.id);
+      openInternalDocument(existing.id);
       return;
     }
     await createPendingInternalLink(title);
@@ -480,7 +557,7 @@ export default function DocumentEditor({
     const item = mode === "name"
       ? findDocumentByTitle(linkTarget)
       : markdownDocuments.find((documentItem) =>
-        documentItem.driveFileId === linkTarget || documentItem.driveId === linkTarget || documentItem.id === linkTarget
+        documentItem.id === linkTarget
       );
     if (!item) return null;
     return {
@@ -532,11 +609,9 @@ export default function DocumentEditor({
           <button type="button" onClick={() => { setLinkModal("external"); setMobileMoreOpen(false); }}>Link externo</button>
           <button type="button" onClick={() => { setImageMenuOpen((open) => !open); setMobileMoreOpen(false); }}>Insertar imagen</button>
           <button type="button" onClick={() => { handleToolbarAction("table"); setMobileMoreOpen(false); }}>Insertar tabla</button>
-          <button type="button" onClick={() => { onOpenStorageConfig?.(); setMobileMoreOpen(false); }}>Configurar carpeta local</button>
+          <button type="button" onClick={() => { onOpenStorageConfig?.(); setMobileMoreOpen(false); }}>Configuracion Firestore</button>
           <button type="button" onClick={() => { onRefreshTree?.(); setMobileMoreOpen(false); }}>Releer arbol</button>
           <button type="button" onClick={() => { setMobileExportMenuOpen(true); setMobileMoreOpen(false); }}>Compartir / Publicar</button>
-          <button type="button" disabled={!driveConnected || busy} onClick={async () => { setMobileMoreOpen(false); await onBackupDrive?.(); }}>Respaldar en Drive</button>
-          <button type="button" disabled={!driveConnected || busy} onClick={async () => { setMobileMoreOpen(false); await onRestoreDrive?.(); }}>Restaurar desde Drive</button>
           <button type="button" onClick={() => { setEditorMode((mode) => mode === "source" ? "visual" : "source"); setMobileMoreOpen(false); }}>
             {editorMode === "source" ? "Editor visual" : "Ver Markdown"}
           </button>
@@ -598,6 +673,20 @@ export default function DocumentEditor({
 
       {editable ? (
         <div className="editor-mode-actions">
+          <div className="ai-document-actions">
+            <span><Sparkles size={14} /> IA</span>
+            {DOCUMENT_AI_ACTIONS.map((action) => (
+              <button
+                className="ghost compact"
+                type="button"
+                key={action.id}
+                disabled={Boolean(aiBusyAction)}
+                onClick={() => runAiAction(action)}
+              >
+                {aiBusyAction === action.id ? "Creando..." : action.label}
+              </button>
+            ))}
+          </div>
           <div className="appflowy-insert-wrap">
             <button className="ghost compact" type="button" onMouseDown={keepEditorSelection} onClick={() => setImageMenuOpen((open) => !open)}>
               <Image size={14} /> Imagen
@@ -607,7 +696,7 @@ export default function DocumentEditor({
                 <button type="button" onMouseDown={keepEditorSelection} onClick={() => fileInputRef.current?.click()}>Elegir archivo</button>
                 <button type="button" onMouseDown={keepEditorSelection} onClick={() => fileInputRef.current?.click()}>Elegir desde galeria</button>
                 <button type="button" onMouseDown={keepEditorSelection} onClick={() => cameraInputRef.current?.click()}>Tomar foto</button>
-                <button type="button" onMouseDown={keepEditorSelection} onClick={() => setLinkModal("drive_image")}>Elegir desde Google Drive</button>
+                <button type="button" onMouseDown={keepEditorSelection} onClick={() => setLinkModal("library_image")}>Elegir desde biblioteca</button>
               </div>
             ) : null}
           </div>
@@ -622,6 +711,47 @@ export default function DocumentEditor({
           </button>
           <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => handleImageFiles(event.target.files)} />
           <input ref={cameraInputRef} hidden type="file" accept="image/*" capture="environment" onChange={(event) => handleImageFiles(event.target.files)} />
+        </div>
+      ) : null}
+      {editable && aiStatus ? (
+        <div className={`document-ai-status ${aiStatus.phase === "error" ? "error" : "loading"}`} role="status">
+          <span className="document-ai-status-dot" aria-hidden="true" />
+          <span>{aiStatus.message}</span>
+          {aiStatus.phase === "retrying" ? <small>Reintentando en unos instantes...</small> : null}
+          {aiStatus.phase === "error" && aiStatus.retryable ? (
+            <button className="ghost compact" type="button" onClick={() => runAiAction(aiStatus.actionConfig)}>
+              Reintentar
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {editable ? (
+        <div className="mobile-ai-toolkit">
+          <button
+            className="mobile-ai-fab"
+            type="button"
+            onClick={() => setMobileAiOpen((open) => !open)}
+            aria-expanded={mobileAiOpen}
+            aria-label="Herramientas de IA"
+          >
+            <Sparkles size={17} /> IA
+          </button>
+          {mobileAiOpen ? (
+            <div className="mobile-ai-menu" role="menu" aria-label="Herramientas IA para este cuaderno">
+              <strong><Sparkles size={14} /> Transformar cuaderno</strong>
+              {DOCUMENT_AI_ACTIONS.map((action) => (
+                <button
+                  type="button"
+                  role="menuitem"
+                  key={action.id}
+                  disabled={Boolean(aiBusyAction)}
+                  onClick={() => runAiAction(action)}
+                >
+                  {aiBusyAction === action.id ? "Creando..." : action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {editable && draft.mode === "book" ? (
@@ -684,7 +814,7 @@ export default function DocumentEditor({
           onClose={() => setLinkModal("")}
           onExternal={insertExternalLink}
           onInternal={insertInternalLink}
-          onInsertDriveImage={(item) => {
+          onInsertLibraryImage={(item) => {
             insertMarkdownAtCursor(`\n${createImageMarkdownBlock({
               url: item.publicFileUrl || item.webContentLink || item.webViewLink,
               alt: item.displayName || item.title || "imagen",
@@ -720,12 +850,12 @@ function createImageMarkdownBlock({ url, alt = "imagen", caption = "" }) {
   return `![${alt.replace(/]/g, "\\]")}](${url})`;
 }
 
-function LinkAssistantModal({ mode, documents, folders = [], search, onSearch, onClose, onExternal, onInternal, onInsertDriveImage }) {
+function LinkAssistantModal({ mode, documents, folders = [], search, onSearch, onClose, onExternal, onInternal, onInsertLibraryImage }) {
   const query = search.trim().toLowerCase();
   const results = documents.filter((item) => {
     const folderPath = (item.folderPath || getFolderPath(item.folderId, folders)).toLowerCase();
     const text = `${cleanDocumentTitle(item)} ${item.contentMarkdown || ""} ${folderPath}`.toLowerCase();
-    if (mode === "drive_image" && item.driveType !== "image") return false;
+    if (mode === "library_image" && item.driveType !== "image" && item.type !== "image") return false;
     if (mode === "internal" && item.editable === false) return false;
     return !query || text.includes(query);
   }).slice(0, 24);
@@ -735,7 +865,7 @@ function LinkAssistantModal({ mode, documents, folders = [], search, onSearch, o
     <div className="export-modal-backdrop">
       <section className="export-modal link-assistant-modal">
         <header>
-          <strong>{mode === "external" ? "Enlace externo" : mode === "drive_image" ? "Imagen desde Drive" : "Enlace interno"}</strong>
+          <strong>{mode === "external" ? "Enlace externo" : mode === "library_image" ? "Imagen desde biblioteca" : "Enlace interno"}</strong>
           <button className="icon-btn" type="button" onClick={onClose}>×</button>
         </header>
         {mode === "external" ? (
@@ -756,7 +886,7 @@ function LinkAssistantModal({ mode, documents, folders = [], search, onSearch, o
             exactMatch={exactMatch}
             onSearch={onSearch}
             onInternal={onInternal}
-            onInsertDriveImage={onInsertDriveImage}
+            onInsertLibraryImage={onInsertLibraryImage}
           />
         )}
       </section>
@@ -764,10 +894,10 @@ function LinkAssistantModal({ mode, documents, folders = [], search, onSearch, o
   );
 }
 
-function InternalLinkPicker({ mode, results, folders, search, exactMatch, onSearch, onInternal, onInsertDriveImage }) {
+function InternalLinkPicker({ mode, results, folders, search, exactMatch, onSearch, onInternal, onInsertLibraryImage }) {
   return (
     <div className="internal-link-picker">
-      <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder={mode === "drive_image" ? "Buscar imagen..." : "Buscar documento..."} autoFocus />
+      <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder={mode === "library_image" ? "Buscar imagen..." : "Buscar documento..."} autoFocus />
       <DocumentSearchList
         mode={mode}
         results={results}
@@ -775,26 +905,26 @@ function InternalLinkPicker({ mode, results, folders, search, exactMatch, onSear
         search={search}
         exactMatch={exactMatch}
         onInternal={onInternal}
-        onInsertDriveImage={onInsertDriveImage}
+        onInsertLibraryImage={onInsertLibraryImage}
       />
     </div>
   );
 }
 
-function DocumentSearchList({ mode, results, folders, search, exactMatch, onInternal, onInsertDriveImage }) {
+function DocumentSearchList({ mode, results, folders, search, exactMatch, onInternal, onInsertLibraryImage }) {
   return (
     <div className="internal-link-results">
       {results.map((item) => (
-        <button key={item.id} type="button" onClick={() => mode === "drive_image" ? onInsertDriveImage(item) : onInternal(item)}>
+        <button key={item.id} type="button" onClick={() => mode === "library_image" ? onInsertLibraryImage(item) : onInternal(item)}>
           <ItemIcon item={item} />
           <span>
             <strong>{cleanDocumentTitle(item)}</strong>
-            <small>{mode === "drive_image" ? item.driveType || item.mimeType || "imagen" : item.folderPath || getFolderPath(item.folderId, folders)}</small>
+            <small>{mode === "library_image" ? item.type || item.mimeType || "imagen" : item.folderPath || getFolderPath(item.folderId, folders)}</small>
           </span>
         </button>
       ))}
       {!results.length ? (
-        <p className="internal-link-empty">{mode === "drive_image" ? "No se encontraron imagenes." : "No se encontraron documentos exactos."}</p>
+        <p className="internal-link-empty">{mode === "library_image" ? "No se encontraron imagenes." : "No se encontraron documentos exactos."}</p>
       ) : null}
       {mode === "internal" && search.trim() && !exactMatch ? (
         <button type="button" onClick={() => onInternal(null)}>
@@ -836,14 +966,13 @@ function getAllMarkdownDocumentsFromTree(documents = [], folders = []) {
   return documents
     .filter((item) => {
       const name = `${item.name || item.title || ""}`.toLowerCase();
-      return item.editable !== false && (item.driveType === "markdown" || item.mimeType === "text/markdown" || name.endsWith(".md"));
+      return item.editable !== false && (["cuaderno", "markdown"].includes(item.type) || item.mimeType === "text/markdown" || name.endsWith(".md"));
     })
     .map((item) => ({
       ...item,
-      driveFileId: item.driveFileId || item.driveId || item.id,
       displayName: cleanDocumentTitle(item),
       folderPath: getFolderPath(item.folderId, folders),
-      parentFolderId: item.driveFolderId || item.folderId || "",
+      parentFolderId: item.folderId || "",
     }))
     .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "es"));
 }
@@ -854,15 +983,15 @@ function DriveResourcePreview({ item }) {
   return (
     <div className="drive-resource-preview">
       <span>
-        <strong>{resourceLabel(item.driveType)}</strong>
-        <small>{item.mimeType || "Archivo de Google Drive"}</small>
+        <strong>{resourceLabel(item.driveType || item.type)}</strong>
+        <small>{item.mimeType || "Recurso externo"}</small>
       </span>
       {item.driveType === "image" && url ? <img src={url} alt={item.title || ""} /> : null}
       {item.driveType === "audio" && url ? <audio controls src={url} /> : null}
       {item.driveType === "video" && url ? <video controls src={url} /> : null}
       {item.driveType === "pdf" && previewUrl ? <iframe title={item.title || "PDF"} src={previewUrl} /> : null}
       <a className="ghost compact" href={item.webViewLink || url} target="_blank" rel="noreferrer">
-        <ExternalLink size={15} /> Abrir en Drive
+        <ExternalLink size={15} /> Abrir recurso
       </a>
     </div>
   );
