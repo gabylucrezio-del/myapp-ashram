@@ -303,13 +303,16 @@ function renderQuestions() {
 }
 
 function renderOption(questionId, dosha, label) {
+  const optionId = `${questionId}-${dosha}`;
   return `
-    <label class="option-card ${dosha}">
-      <input type="radio" name="${questionId}" value="${dosha}" />
-      <strong>${DOSHAS[dosha].label}</strong>
-      <span>${label}</span>
-      <small>Seleccionar</small>
-    </label>
+    <div class="option-card ${dosha}">
+      <input id="${optionId}" type="radio" name="${questionId}" value="${dosha}" aria-label="Seleccionar ${DOSHAS[dosha].label}" />
+      <span class="option-content">
+        <strong>${DOSHAS[dosha].label}</strong>
+        <span>${label}</span>
+        <small>Seleccionar</small>
+      </span>
+    </div>
   `;
 }
 

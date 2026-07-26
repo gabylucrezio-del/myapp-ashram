@@ -245,6 +245,100 @@ exports.ganeshaChat = onRequest({
   }
 });
 
+exports.englishTeacher = onRequest({
+  secrets: [GEMINI_API_KEY],
+  timeoutSeconds: 60,
+  memory: "512MiB",
+  invoker: "public",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (req, res) => {
+  setCorsHeaders(res);
+  console.log("englishTeacher function ejecutada");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).json({error: "Metodo no permitido."});
+    return;
+  }
+
+  try {
+    const lessonContext = {
+      practiceType: cleanText(req.body?.practiceType || "speaking"),
+      currentPhrase: cleanText(req.body?.currentPhrase || ""),
+      pronunciation: cleanText(req.body?.pronunciation || ""),
+      translation: cleanText(req.body?.translation || ""),
+      userSpeech: cleanText(req.body?.userSpeech || ""),
+      selectedAnswer: cleanText(req.body?.selectedAnswer || ""),
+      correctAnswer: cleanText(req.body?.correctAnswer || ""),
+      userAnswer: cleanText(req.body?.userAnswer || ""),
+      missingWord: cleanText(req.body?.missingWord || ""),
+      lessonId: cleanText(req.body?.lessonId || ""),
+      validAnswers: Array.isArray(req.body?.validAnswers) ?
+        req.body.validAnswers.map((item) => cleanText(item)) :
+        [],
+      conversationHistory: Array.isArray(req.body?.conversationHistory) ?
+        req.body.conversationHistory.slice(-8) :
+        [],
+    };
+    const lessonState = sanitizeEnglishLessonState(req.body?.lessonState);
+    const userProgress = sanitizeEnglishUserProgress(req.body?.userProgress);
+    const userName = cleanText(req.body?.userName || "estudiante");
+    const question = cleanText(
+        req.body?.message || req.body?.question || "Corrige mi practica.",
+    );
+
+    console.log("English Teacher practiceType:", lessonContext.practiceType);
+    if (lessonContext.practiceType === "generate_practice") {
+      const generated = await askGeminiEnglishLessonGenerator({
+        apiKey: GEMINI_API_KEY.value(),
+        userName,
+        level: cleanText(req.body?.level || "basico"),
+        topic: cleanText(req.body?.topic || "conversacion"),
+      });
+      res.json(generated);
+      return;
+    }
+
+    if (lessonContext.practiceType === "chat") {
+      const chatResult = await askGeminiEnglishTeacherChat({
+        apiKey: GEMINI_API_KEY.value(),
+        message: question,
+        userName,
+        currentTopic: cleanText(req.body?.currentTopic || ""),
+        lessonState,
+        userProgress,
+      });
+      res.json(chatResult);
+      return;
+    }
+
+    const result = await askGeminiEnglishTeacher({
+      apiKey: GEMINI_API_KEY.value(),
+      question,
+      userName,
+      lessonContext,
+    });
+    res.json(result);
+  } catch (error) {
+    logger.error("englishTeacher error", error);
+    res.status(500).json({
+      answer: "No pude corregir la practica en este momento.",
+      correct: false,
+      score: 0,
+      correctPhrase: cleanText(req.body?.currentPhrase || ""),
+      userPhrase: cleanText(req.body?.userSpeech || req.body?.userAnswer || ""),
+      correction: "Intenta nuevamente en unos instantes.",
+      pronunciation: cleanText(req.body?.pronunciation || ""),
+      translation: cleanText(req.body?.translation || ""),
+      nextAction: "repeat",
+    });
+  }
+});
+
 exports.ganeshaTransformDocument = onRequest({
   secrets: [GEMINI_API_KEY],
   timeoutSeconds: 60,
@@ -383,7 +477,7 @@ exports.analyticsDiagnostics = onRequest({
   }
   try {
     const decoded = await verifySignedRequest(req);
-    if (decoded.email !== "gabriel@ashramganesha.com") {
+    if (!ADMIN_EMAILS.has(String(decoded.email || ""))) {
       res.status(403).json({error: "Solo administrador."});
       return;
     }
@@ -398,8 +492,6 @@ exports.analyticsDiagnostics = onRequest({
       "categoryStats",
       "dailyInterestStats",
       "ganeshaQuestionStats",
-      "userPresence",
-      "users",
     ];
     const counts = {};
     await Promise.all(collections.map(async (name) => {
@@ -410,15 +502,10 @@ exports.analyticsDiagnostics = onRequest({
         .orderBy("timestamp", "desc")
         .limit(1)
         .get();
-    const latestPresence = await firestore.collection("userPresence")
-        .orderBy("lastActiveAt", "desc")
-        .limit(1)
-        .get();
     res.json({
       ok: true,
       counts,
       latestEvent: latestEvent.docs[0]?.data() || null,
-      latestPresence: latestPresence.docs[0]?.data() || null,
     });
   } catch (error) {
     logger.error("analyticsDiagnostics error", error);
@@ -428,10 +515,69 @@ exports.analyticsDiagnostics = onRequest({
   }
 });
 
+exports.deleteUserAccount = onRequest({
+  timeoutSeconds: 30,
+  memory: "256MiB",
+  invoker: "public",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (req, res) => {
+  setCorsHeaders(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "POST") {
+    res.status(405).json({error: "Metodo no permitido."});
+    return;
+  }
+
+  try {
+    const decoded = await verifyAdminRequest(req);
+    const uid = cleanText(req.body?.uid || "");
+    if (!uid) {
+      res.status(400).json({error: "Falta uid."});
+      return;
+    }
+    if (uid === decoded.uid) {
+      res.status(400).json({error: "No podes borrar tu propio usuario."});
+      return;
+    }
+
+    const firestore = admin.firestore();
+    const realtime = admin.database();
+    await Promise.all([
+      deleteAuthUser(uid),
+      realtime.ref(`usuarios/${uid}`).remove(),
+      firestore.collection("users").doc(uid).delete(),
+    ]);
+    await Promise.allSettled([
+      realtime.ref(`chat/${uid}`).remove(),
+      firestore.collection("userPresence").doc(uid).delete(),
+      firestore.collection("userAnalytics").doc(uid).delete(),
+      firestore.collection("analyticsUserSeen").doc(uid).delete(),
+    ]);
+
+    res.json({ok: true});
+  } catch (error) {
+    logger.error("deleteUserAccount error", error);
+    res.status(error.status || 500).json({
+      error: error.message || "No se pudo borrar el usuario.",
+    });
+  }
+});
+
+async function deleteAuthUser(uid) {
+  try {
+    await admin.auth().deleteUser(uid);
+  } catch (error) {
+    if (error.code === "auth/user-not-found") return;
+    throw error;
+  }
+}
+
 async function aggregateAnalyticsData(firestore, data = {}) {
   const eventType = cleanText(data.eventType || "");
-  const userId = cleanText(data.userId || "");
-  if (!eventType || !userId) return;
+  if (!eventType) return;
 
   const fieldValue = admin.firestore.FieldValue;
   const dateKey = cleanText(data.dateKey || todayKey());
@@ -450,35 +596,13 @@ async function aggregateAnalyticsData(firestore, data = {}) {
         .filter(Boolean)
         .slice(0, 12) :
     topics;
-  const durationMinutes = Number(data.durationMinutes || 0);
   const batch = firestore.batch();
 
   batch.set(firestore.collection("analyticsStats").doc("overview"), {
     totalEvents: fieldValue.increment(1),
     [eventType]: fieldValue.increment(1),
-    totalSessionMinutes: fieldValue.increment(durationMinutes),
     updatedAt: fieldValue.serverTimestamp(),
   }, {merge: true});
-
-  const userAnalyticsPatch = {
-    userId,
-    lastActiveAt: fieldValue.serverTimestamp(),
-    lastActiveDateKey: dateKey,
-    deviceType: cleanText(data.deviceType || ""),
-    updatedAt: fieldValue.serverTimestamp(),
-  };
-  if (topics.length) {
-    userAnalyticsPatch.interests = fieldValue.arrayUnion(...topics);
-  }
-  batch.set(
-      firestore.collection("userAnalytics").doc(userId),
-      userAnalyticsPatch,
-      {merge: true},
-  );
-
-  if (eventType === "login") {
-    await registerUniqueAnalyticsUser(firestore, userId, data);
-  }
 
   if (data.contentId || data.contentTitle) {
     const contentStatId = stableId([
@@ -492,6 +616,8 @@ async function aggregateAnalyticsData(firestore, data = {}) {
       contentId: cleanText(data.contentId || ""),
       title: cleanText(data.contentTitle || "Sin titulo"),
       category: contentCategory,
+      tags: Array.isArray(data.tags) ? data.tags.slice(0, 20) : [],
+      topics,
       count: fieldValue.increment(1),
       lastEventAt: fieldValue.serverTimestamp(),
     }, {merge: true});
@@ -587,8 +713,9 @@ function normalizeAnalyticsEvent(body = {}, decoded = {}) {
     error.status = 400;
     throw error;
   }
+  const userHash = decoded.uid ? stableId(decoded.uid).slice(0, 24) : "";
   return {
-    userId: decoded.uid,
+    userHash,
     eventType,
     contentId: cleanText(body.contentId || "").slice(0, 180),
     contentTitle: cleanText(body.contentTitle || "").slice(0, 220),
@@ -1317,6 +1444,170 @@ async function askGemini({apiKey, question, userName, context}) {
       .trim() || "";
 }
 
+async function askGeminiEnglishTeacher({
+  apiKey,
+  question,
+  userName,
+  lessonContext = {},
+}) {
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY no configurado");
+  }
+
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{text: buildEnglishTeacherInstruction()}],
+      },
+      contents: [{
+        role: "user",
+        parts: [{
+          text: buildEnglishTeacherPrompt({
+            question,
+            userName,
+            lessonContext,
+          }),
+        }],
+      }],
+      generationConfig: {
+        temperature: 0.25,
+        topP: 0.8,
+        maxOutputTokens: 900,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw geminiError(response.status, errorText);
+  }
+
+  const text = (await response.json())?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text || "")
+      .join("\n")
+      .trim() || "";
+  return normalizeEnglishTeacherResponse(parseJsonObject(text), lessonContext);
+}
+
+async function askGeminiEnglishTeacherChat({
+  apiKey,
+  message,
+  userName,
+  currentTopic,
+  lessonState = {},
+  userProgress = {},
+}) {
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY no configurado");
+  }
+
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{text: buildEnglishTeacherChatInstruction()}],
+      },
+      contents: [{
+        role: "user",
+        parts: [{
+          text: buildEnglishTeacherChatPrompt({
+            message,
+            userName,
+            currentTopic,
+            lessonState,
+            userProgress,
+          }),
+        }],
+      }],
+      generationConfig: {
+        temperature: 0.45,
+        topP: 0.85,
+        maxOutputTokens: 1400,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw geminiError(response.status, errorText);
+  }
+
+  const text = (await response.json())?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text || "")
+      .join("\n")
+      .trim() || "";
+  return normalizeEnglishTeacherChatResponse(parseJsonObject(text), {
+    currentTopic,
+    lessonState,
+  });
+}
+
+async function askGeminiEnglishLessonGenerator({
+  apiKey,
+  userName,
+  level,
+  topic,
+}) {
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY no configurado");
+  }
+
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{text: buildEnglishLessonGeneratorInstruction()}],
+      },
+      contents: [{
+        role: "user",
+        parts: [{
+          text: [
+            `Usuario: ${userName}`,
+            `Nivel: ${level}`,
+            `Tema: ${topic}`,
+            "Genera una practica completa lista para importar.",
+          ].join("\n"),
+        }],
+      }],
+      generationConfig: {
+        temperature: 0.65,
+        topP: 0.9,
+        maxOutputTokens: 5000,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw geminiError(response.status, errorText);
+  }
+
+  const text = (await response.json())?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text || "")
+      .join("\n")
+      .trim() || "";
+  return normalizeGeneratedEnglishLesson(parseJsonObject(text), level, topic);
+}
+
 async function askGeminiTransform({apiKey, action, title, content}) {
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY no configurado");
@@ -1434,25 +1725,6 @@ function geminiError(status, rawText = "") {
   return error;
 }
 
-async function registerUniqueAnalyticsUser(firestore, userId, data = {}) {
-  const seenRef = firestore.collection("analyticsUserSeen").doc(userId);
-  const overviewRef = firestore.collection("analyticsStats").doc("overview");
-  const fieldValue = admin.firestore.FieldValue;
-  await firestore.runTransaction(async (transaction) => {
-    const seen = await transaction.get(seenRef);
-    if (seen.exists) return;
-    transaction.set(seenRef, {
-      userId,
-      firstSeenAt: fieldValue.serverTimestamp(),
-      deviceType: cleanText(data.deviceType || ""),
-    });
-    transaction.set(overviewRef, {
-      totalUsers: fieldValue.increment(1),
-      updatedAt: fieldValue.serverTimestamp(),
-    }, {merge: true});
-  });
-}
-
 function stableId(value = "") {
   const clean = String(value || "")
       .normalize("NFD")
@@ -1517,6 +1789,303 @@ function buildSystemInstruction(userName) {
     "No indiques tratamientos médicos.",
     "Habla como un guía amable.",
   ].join("\n");
+}
+
+function buildEnglishTeacherInstruction() {
+  return [
+    "Eres un profesor de ingles para un usuario hispanohablante.",
+    "Tu tarea es ensenar ingles de forma clara, amable, practica y progresiva.",
+    "Responde siempre en espanol, salvo cuando muestres frases en ingles.",
+    "Debes ayudar al usuario a hablar ingles, escuchar ingles, comprender " +
+      "frases, corregir pronunciacion, corregir gramatica, responder " +
+      "preguntas, mejorar fluidez y aprender vocabulario.",
+    "Cuando el usuario practique una frase, compara la frase correcta con " +
+      "lo que dijo el usuario.",
+    "Detecta palabras faltantes.",
+    "Detecta palabras mal pronunciadas o mal reconocidas.",
+    "Explica el error de forma simple.",
+    "Da la frase correcta.",
+    "Da la pronunciacion aproximada en espanol.",
+    "Da una version mas natural si corresponde.",
+    "Devuelve un puntaje de 0 a 100.",
+    "Si score >= 85, correct debe ser true.",
+    "Si score < 85, correct debe ser false.",
+    "Si correct es true, nextAction debe ser \"continue\".",
+    "Si correct es false, nextAction debe ser \"repeat\".",
+    "No uses fuentes del Ashram.",
+    "No muestres enlaces.",
+    "No respondas como guia espiritual.",
+    "Devuelve exclusivamente JSON valido.",
+    "El JSON debe tener exactamente estas claves principales: answer, " +
+      "correct, score, correctPhrase, userPhrase, correction, " +
+      "pronunciation, translation, nextAction.",
+  ].join("\n");
+}
+
+function buildEnglishTeacherChatInstruction() {
+  return [
+    "Eres un profesor de ingles para Gabriel, un usuario hispanohablante.",
+    "La experiencia es una clase guiada en formato chat para celular.",
+    "Habla siempre en espanol para guiar, salvo cuando muestres frases " +
+      "en ingles.",
+    "No uses fuentes del Ashram.",
+    "No respondas como guia espiritual.",
+    "No muestres enlaces.",
+    "Debes interpretar mensajes como: quiero practicar Ayurveda, haceme " +
+      "la clase mas facil, haceme la clase mas dificil, no entendi, dame " +
+      "otro ejemplo, quiero hablar de meditacion, repetir clase, tema nuevo " +
+      "o hagamos una conversacion.",
+    "Acciones permitidas: continue_lesson, repeat_lesson, choose_new_topic, " +
+      "generate_new_lesson, explain_again, free_conversation.",
+    "Si el usuario pide tema nuevo u otro tema, usa action " +
+      "choose_new_topic.",
+    "Si el usuario pide repetir clase, usa action repeat_lesson.",
+    "Si el usuario pide una clase de un tema nuevo o cambiar dificultad, " +
+      "usa action generate_new_lesson e incluye phrases.",
+    "Si el usuario no entiende, usa action explain_again.",
+    "Si el usuario quiere conversar libremente, usa action free_conversation.",
+    "Si conviene seguir la clase actual, usa action continue_lesson.",
+    "Cuando generes phrases, crea entre 5 y 10 frases simples con: id, " +
+      "english, pronunciation, translation.",
+    "Devuelve exclusivamente JSON valido.",
+    "El JSON debe tener estas claves: answer, action, topic, currentPhrase, " +
+      "phrases, suggestedReplies.",
+    "currentPhrase debe tener: english, pronunciation, translation.",
+    "suggestedReplies debe tener hasta 3 frases cortas en ingles.",
+  ].join("\n");
+}
+
+function buildEnglishLessonGeneratorInstruction() {
+  return [
+    "Eres un profesor de ingles para hispanohablantes.",
+    "Generas material de practica claro, util y progresivo.",
+    "Devuelve exclusivamente JSON valido.",
+    "No incluyas texto fuera del JSON.",
+    "El JSON debe tener: title, level, topic, phrases, questions, " +
+      "fill_blanks, listening, words.",
+    "phrases debe contener exactamente 10 objetos con: id, english, " +
+      "pronunciation, spanish.",
+    "questions debe contener exactamente 10 objetos con: id, question, " +
+      "validAnswers, options.",
+    "fill_blanks debe contener exactamente 10 objetos con: id, prompt, " +
+      "answer, options.",
+    "listening debe contener exactamente 10 objetos con: id, title, text, " +
+      "correctAnswers, options.",
+    "words debe contener exactamente 10 objetos con: id, word, answer, " +
+      "options.",
+    "Usa ingles simple si el nivel es basico.",
+    "Incluye temas de Ayurveda, yoga o meditacion solo si el tema lo pide.",
+  ].join("\n");
+}
+
+function buildEnglishTeacherChatPrompt({
+  message,
+  userName,
+  currentTopic,
+  lessonState,
+  userProgress,
+}) {
+  return [
+    `Usuario: ${cleanText(userName || "Gabriel")}`,
+    `Mensaje escrito: ${cleanText(message || "")}`,
+    `Tema actual: ${cleanText(currentTopic || "")}`,
+    "",
+    "Estado actual de la clase:",
+    JSON.stringify(lessonState || {}),
+    "",
+    "Progreso del usuario:",
+    JSON.stringify(userProgress || {}),
+    "",
+    "Responde como profesor real y decide la accion mas util.",
+  ].join("\n");
+}
+
+function buildEnglishTeacherPrompt({question, userName, lessonContext = {}}) {
+  return [
+    `Usuario: ${cleanText(userName || "estudiante")}`,
+    `Pedido del usuario: ${cleanText(question || "")}`,
+    `Tipo de practica: ${cleanText(lessonContext.practiceType || "speaking")}`,
+    "",
+    "Contexto de la leccion:",
+    JSON.stringify({
+      lessonId: cleanText(lessonContext.lessonId || ""),
+      currentPhrase: cleanText(lessonContext.currentPhrase || ""),
+      pronunciation: cleanText(lessonContext.pronunciation || ""),
+      translation: cleanText(lessonContext.translation || ""),
+      userSpeech: cleanText(lessonContext.userSpeech || ""),
+      selectedAnswer: cleanText(lessonContext.selectedAnswer || ""),
+      correctAnswer: cleanText(lessonContext.correctAnswer || ""),
+      validAnswers: Array.isArray(lessonContext.validAnswers) ?
+        lessonContext.validAnswers.map((item) => cleanText(item)) :
+        [],
+      missingWord: cleanText(lessonContext.missingWord || ""),
+      userAnswer: cleanText(lessonContext.userAnswer || ""),
+      conversationHistory: Array.isArray(lessonContext.conversationHistory) ?
+        lessonContext.conversationHistory.slice(-8) :
+        [],
+    }),
+    "",
+    "Instrucciones por practiceType:",
+    "speaking: corrige lo que el usuario dijo.",
+    "listening_translation: evalua si la traduccion elegida es correcta.",
+    "question_answer: evalua si la respuesta es apropiada.",
+    "fill_blank: evalua si la palabra completada es correcta.",
+    "conversation: conversa en ingles sencillo y corrige en espanol.",
+  ].join("\n");
+}
+
+function normalizeEnglishTeacherChatResponse(parsed = {}, context = {}) {
+  const allowedActions = new Set([
+    "continue_lesson",
+    "repeat_lesson",
+    "choose_new_topic",
+    "generate_new_lesson",
+    "explain_again",
+    "free_conversation",
+  ]);
+  const action = cleanText(parsed.action || "continue_lesson");
+  const topic = cleanText(
+      parsed.topic ||
+      context.currentTopic ||
+      context.lessonState?.topic ||
+      "libre",
+  );
+  const phrases = normalizeGeneratedArray(parsed.phrases)
+      .map((item, index) => normalizeEnglishPhrase(item, topic, index))
+      .filter((item) => item.english && item.pronunciation && item.translation)
+      .slice(0, 10);
+  const currentPhrase = normalizeEnglishPhrase(
+      parsed.currentPhrase || phrases[0] || context.lessonState?.phrases?.[
+        context.lessonState?.currentIndex || 0
+      ],
+      topic,
+      0,
+  );
+
+  return {
+    answer: cleanText(parsed.answer ||
+      "Claro, Gabriel. Sigamos practicando paso a paso."),
+    action: allowedActions.has(action) ? action : "continue_lesson",
+    topic,
+    currentPhrase,
+    phrases,
+    suggestedReplies: normalizeGeneratedArray(parsed.suggestedReplies)
+        .map((item) => cleanText(item))
+        .filter(Boolean)
+        .slice(0, 3),
+  };
+}
+
+function normalizeEnglishPhrase(item = {}, topic = "libre", index = 0) {
+  return {
+    id: cleanText(item.id || `${topic}-${index + 1}`),
+    english: cleanText(item.english || item.frase_ingles ||
+      item.correctPhrase || ""),
+    pronunciation: cleanText(item.pronunciation || item.pronunciacion || ""),
+    translation: cleanText(item.translation || item.spanish ||
+      item.traduccion || ""),
+  };
+}
+
+function normalizeEnglishTeacherResponse(parsed = {}, lessonContext = {}) {
+  const score = clampScore(Number(parsed.score));
+  const correct = score >= 85;
+  const correctPhrase = cleanText(
+      parsed.correctPhrase || lessonContext.currentPhrase || "",
+  );
+  const userPhrase = cleanText(
+      parsed.userPhrase ||
+      lessonContext.userSpeech ||
+      lessonContext.userAnswer ||
+      lessonContext.selectedAnswer ||
+      "",
+  );
+
+  return {
+    answer: cleanText(parsed.answer || parsed.explanation ||
+      "Vamos paso a paso. Revisa la correccion y repeti la frase."),
+    correct,
+    score,
+    correctPhrase,
+    userPhrase,
+    correction: cleanText(parsed.correction ||
+      (correct ? "Muy bien, la respuesta esta aprobada." :
+        "Hay algo para corregir antes de avanzar.")),
+    pronunciation: cleanText(
+        parsed.pronunciation || lessonContext.pronunciation || "",
+    ),
+    translation: cleanText(
+        parsed.translation || lessonContext.translation || "",
+    ),
+    nextAction: correct ? "continue" : "repeat",
+  };
+}
+
+function normalizeGeneratedEnglishLesson(parsed = {}, level = "", topic = "") {
+  const title = cleanText(parsed.title ||
+    `Practica ${topic || "ingles"} - ${level || "basico"}`);
+  return {
+    title,
+    level: cleanText(parsed.level || level || "basico"),
+    topic: cleanText(parsed.topic || topic || "conversacion"),
+    phrases: normalizeGeneratedArray(parsed.phrases).slice(0, 10),
+    questions: normalizeGeneratedArray(parsed.questions).slice(0, 10),
+    fill_blanks: normalizeGeneratedArray(parsed.fill_blanks).slice(0, 10),
+    listening: normalizeGeneratedArray(parsed.listening).slice(0, 10),
+    words: normalizeGeneratedArray(parsed.words).slice(0, 10),
+  };
+}
+
+function normalizeGeneratedArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function sanitizeEnglishLessonState(value = {}) {
+  const phrases = Array.isArray(value?.phrases) ?
+    value.phrases.map((item, index) =>
+      normalizeEnglishPhrase(item, cleanText(value?.topic || "libre"), index),
+    ).filter((item) =>
+      item.english && item.pronunciation && item.translation,
+    ).slice(0, 10) :
+    [];
+  return {
+    topic: cleanText(value?.topic || ""),
+    phrases,
+    currentIndex: clampIndex(value?.currentIndex, phrases.length),
+    completed: Boolean(value?.completed),
+  };
+}
+
+function sanitizeEnglishUserProgress(value = {}) {
+  return {
+    correctPhrases: normalizeGeneratedArray(value?.correctPhrases)
+        .map((item) => cleanText(item))
+        .filter(Boolean)
+        .slice(0, 30),
+    incorrectPhrases: normalizeGeneratedArray(value?.incorrectPhrases)
+        .map((item) => cleanText(item))
+        .filter(Boolean)
+        .slice(0, 30),
+    frequentErrors: normalizeGeneratedArray(value?.frequentErrors)
+        .map((item) => {
+          if (typeof item === "string") return cleanText(item);
+          return cleanText(item?.error || item?.correction || "");
+        })
+        .filter(Boolean)
+        .slice(0, 12),
+  };
+}
+
+function clampScore(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function clampIndex(value, total) {
+  const index = Number(value);
+  if (!Number.isFinite(index) || index < 0) return 0;
+  if (!total) return 0;
+  return Math.min(Math.round(index), total - 1);
 }
 
 function formatResponse(answer, sources, enough) {

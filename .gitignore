@@ -23,3 +23,9 @@ firebase-debug.log
 
 .agents/
 skills-lock.json
+
+ganesha-ia-offline/.gradle/
+ganesha-ia-offline/app/build/
+ganesha-ia-offline/build/
+ganflow/dist/
+gallery/

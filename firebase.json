@@ -50,12 +50,28 @@
         "function": "ganeshaChat"
       },
       {
+        "source": "/api/english-teacher",
+        "function": "englishTeacher"
+      },
+      {
         "source": "/api/ganesha-transform-document",
         "function": "ganeshaTransformDocument"
       },
       {
+        "source": "/api/analytics-event",
+        "function": "recordAnalyticsEvent"
+      },
+      {
+        "source": "/api/analytics-diagnostics",
+        "function": "analyticsDiagnostics"
+      },
+      {
         "source": "/api/library-diagnostics",
         "function": "libraryDiagnostics"
+      },
+      {
+        "source": "/api/delete-user",
+        "function": "deleteUserAccount"
       },
       {
         "source": "**",

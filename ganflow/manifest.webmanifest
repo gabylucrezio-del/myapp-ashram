@@ -1,0 +1,9 @@
+{
+  "name": "GanFlow",
+  "short_name": "GanFlow",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#fbfaf6",
+  "theme_color": "#3f7a5d",
+  "icons": []
+}

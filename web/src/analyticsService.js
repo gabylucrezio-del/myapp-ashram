@@ -1,118 +1,78 @@
-import { auth, firestoreDb } from "./firebase";
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  increment,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore";
+import { logEvent } from "firebase/analytics";
+import { doc, increment, serverTimestamp, setDoc } from "firebase/firestore";
+import { analyticsPromise, auth, firestoreDb } from "./firebase";
 
-const SESSION_KEY = "ashram-analytics-session";
 const ANALYTICS_ENDPOINT = "/api/analytics-event";
-const ANALYTICS_DISABLED = true;
+const COMMUNITY_ANALYTICS_ENABLED = true;
 const STOP_WORDS = new Set([
   "para", "como", "con", "por", "una", "uno", "las", "los", "del", "que",
   "este", "esta", "esto", "sobre", "desde", "hacia", "cuando", "donde",
   "quiero", "puedo", "necesito", "ashram", "ganesha", "guia",
   "cual", "cuales", "hacer", "decir", "tengo", "estoy", "puede", "pueden",
+  "consulta", "consultar", "saber", "interesa", "interes", "tema", "temas",
 ]);
 
 export function startAnalyticsSession(user, profile) {
-  // Hook-shaped helper kept dependency-free so App can call it from useEffect.
-  if (ANALYTICS_DISABLED) return () => {};
   if (!user?.uid) return () => {};
-  const startedAt = Date.now();
-  const sessionId = ensureSessionId();
-  let closed = false;
+  recordLogin(user, profile).catch(logPresenceError);
+  setPresence(user, profile, true).catch(logPresenceError);
 
-  recordLogin(user, profile);
-  setPresence(user, profile, true);
-  console.log("Usuario activo", { userId: user.uid, deviceType: deviceType() });
-  trackEvent("login", { contentTitle: "Ingreso a la plataforma" });
-
-  const activityTimer = window.setInterval(() => {
-    setPresence(user, profile, true);
-  }, 60000);
-
-  const closeSession = () => {
-    if (closed) return;
-    closed = true;
-    window.clearInterval(activityTimer);
-    const durationMinutes = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
-    updateSessionMinutes(user.uid, durationMinutes);
-    trackEvent("logout", { durationMinutes, sessionId });
-    setPresence(user, profile, false);
+  const heartbeat = window.setInterval(() => {
+    setPresence(user, profile, true).catch(logPresenceError);
+  }, 60 * 1000);
+  const handleVisibility = () => {
+    setPresence(user, profile, document.visibilityState === "visible").catch(logPresenceError);
+  };
+  const markOffline = () => {
+    setPresence(user, profile, false).catch(logPresenceError);
   };
 
-  const onVisibility = () => {
-    if (document.visibilityState === "hidden") {
-      const durationMinutes = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
-      updateSessionMinutes(user.uid, durationMinutes);
-      setPresence(user, profile, false);
-    } else {
-      setPresence(user, profile, true);
-    }
-  };
+  document.addEventListener("visibilitychange", handleVisibility);
+  window.addEventListener("pagehide", markOffline);
+  window.addEventListener("beforeunload", markOffline);
 
-  window.addEventListener("beforeunload", closeSession);
-  document.addEventListener("visibilitychange", onVisibility);
   return () => {
-    window.removeEventListener("beforeunload", closeSession);
-    document.removeEventListener("visibilitychange", onVisibility);
-    closeSession();
+    window.clearInterval(heartbeat);
+    document.removeEventListener("visibilitychange", handleVisibility);
+    window.removeEventListener("pagehide", markOffline);
+    window.removeEventListener("beforeunload", markOffline);
+    markOffline();
   };
 }
 
 export async function recordLogin(user, profile = {}) {
-  if (ANALYTICS_DISABLED) return;
-  if (!user?.uid) return;
-  const ref = doc(firestoreDb, "userAnalytics", user.uid);
-  const current = await getDoc(ref).catch(() => null);
-  const base = {
+  if (!user?.uid) return undefined;
+  return setDoc(doc(firestoreDb, "userAnalytics", user.uid), {
     userId: user.uid,
+    email: user.email || profile.email || "",
+    displayName: displayName(user, profile),
     lastLogin: serverTimestamp(),
     lastActiveAt: serverTimestamp(),
     lastActiveDateKey: dateKey(),
     totalLogins: increment(1),
     deviceType: deviceType(),
     updatedAt: serverTimestamp(),
-  };
-  if (!current?.exists?.()) {
-    base.registeredAt = serverTimestamp();
-    base.totalMinutes = 0;
-    base.interests = [];
-  }
-  await setDoc(ref, base, { merge: true }).catch((error) => {
-    console.warn("No se pudo registrar analitica de login", error);
-  });
+  }, { merge: true });
 }
 
 export async function setPresence(user, profile = {}, isOnline = true) {
-  if (ANALYTICS_DISABLED) return;
-  if (!user?.uid) return;
-  const presenceData = {
+  if (!user?.uid) return undefined;
+  return setDoc(doc(firestoreDb, "userPresence", user.uid), {
     userId: user.uid,
-    isOnline,
+    email: user.email || profile.email || "",
+    displayName: displayName(user, profile),
+    isOnline: Boolean(isOnline),
     lastActiveAt: serverTimestamp(),
     deviceType: deviceType(),
-  };
-  console.log("Usuario activo", { userId: user.uid, isOnline, deviceType: presenceData.deviceType });
-  await setDoc(doc(firestoreDb, "userPresence", user.uid), presenceData, { merge: true }).catch((error) => {
-    console.warn("No se pudo actualizar presencia", error);
-  });
-  await setDoc(doc(firestoreDb, "users", user.uid), presenceData, { merge: true }).catch((error) => {
-    console.warn("No se pudo actualizar presencia en users", error);
-  });
+  }, { merge: true });
 }
 
 export async function trackEvent(eventType, payload = {}) {
-  if (ANALYTICS_DISABLED) return;
+  trackFirebaseAnalyticsEvent(eventType, payload);
+  if (!COMMUNITY_ANALYTICS_ENABLED) return;
   const user = auth.currentUser;
   if (!user?.uid || !eventType) return;
-  console.log("Registrando evento", eventType, payload);
+  if (!isCommunityInterestEvent(eventType)) return;
   const topics = normalizeTopics(payload.detectedTopics?.length ? payload.detectedTopics : extractTopics([
     payload.contentTitle,
     payload.contentCategory,
@@ -121,7 +81,6 @@ export async function trackEvent(eventType, payload = {}) {
   ].filter(Boolean).join(" ")));
   const keywords = normalizeTopics(payload.keywords?.length ? payload.keywords : topics);
   const eventData = {
-    userId: user.uid,
     eventType,
     contentId: payload.contentId || "",
     contentTitle: trimText(payload.contentTitle || "", 180),
@@ -134,7 +93,6 @@ export async function trackEvent(eventType, payload = {}) {
     searchQuery: trimText(payload.searchQuery || "", 180),
     detectedTopics: topics,
     durationMinutes: Number(payload.durationMinutes || 0),
-    timestamp: serverTimestamp(),
     dateKey: dateKey(),
     deviceType: deviceType(),
   };
@@ -148,20 +106,82 @@ export async function trackEvent(eventType, payload = {}) {
       },
       body: JSON.stringify({
         ...eventData,
-        timestamp: undefined,
       }),
     });
     if (response.ok) {
-      console.log("Evento registrado", eventType);
+      console.log("Interes comunitario registrado", {
+        eventType,
+        contentType: eventData.contentType,
+        contentTitle: eventData.contentTitle,
+        detectedTopics: eventData.detectedTopics,
+      });
       return;
     }
-    console.warn("Endpoint de analiticas respondio con error", response.status, await response.text().catch(() => ""));
+    console.warn("Endpoint de intereses respondio con error", response.status, await response.text().catch(() => ""));
   } catch (error) {
-    console.warn("Endpoint de analiticas no disponible, usando fallback.", error);
+    console.warn("No se pudo registrar interes comunitario.", error);
   }
-  await addDoc(collection(firestoreDb, "analyticsEvents"), eventData).catch((error) => {
-    console.warn("No se pudo registrar evento analitico", error);
-  });
+}
+
+async function trackFirebaseAnalyticsEvent(eventType, payload = {}) {
+  if (!eventType) return;
+  try {
+    const analytics = await analyticsPromise;
+    if (!analytics) return;
+    const eventData = sanitizeAnalyticsPayload({
+      ...payload,
+      user_state: auth.currentUser?.uid ? "registrado" : "visitante",
+      screen_name: payload.screenName || payload.contentType || payload.contentCategory || "",
+      content_type: payload.contentType || "",
+      content_id: payload.contentId || "",
+      content_title: payload.contentTitle || "",
+      content_category: payload.contentCategory || payload.category || "",
+    });
+    logEvent(analytics, normalizeAnalyticsEventName(eventType), eventData);
+    if (eventType === "open_section") {
+      logEvent(analytics, "screen_view", sanitizeAnalyticsPayload({
+        firebase_screen: payload.contentTitle || payload.contentId || "home",
+        firebase_screen_class: "AshramWeb",
+        screen_name: payload.contentTitle || payload.contentId || "home",
+      }));
+    }
+  } catch (error) {
+    console.warn("No se pudo enviar evento a Firebase Analytics.", error);
+  }
+}
+
+function normalizeAnalyticsEventName(eventType = "") {
+  return String(eventType || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40) || "evento";
+}
+
+function sanitizeAnalyticsPayload(payload = {}) {
+  return Object.fromEntries(Object.entries(payload)
+    .map(([key, value]) => [normalizeAnalyticsParamName(key), analyticsParamValue(value)])
+    .filter(([key, value]) => key && value !== undefined && value !== ""));
+}
+
+function normalizeAnalyticsParamName(key = "") {
+  return String(key || "")
+    .replace(/[A-Z]/g, (match) => `_${match.toLowerCase()}`)
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+}
+
+function analyticsParamValue(value) {
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.join(", ").slice(0, 100);
+  if (value == null) return "";
+  return String(value).slice(0, 100);
 }
 
 export function trackContentOpen(contentType, item = {}, extra = {}) {
@@ -212,14 +232,24 @@ export function trackRelatedResource(resource = {}) {
 }
 
 async function updateSessionMinutes(userId, durationMinutes) {
-  if (ANALYTICS_DISABLED) return;
-  if (!userId || !durationMinutes) return;
-  await updateDoc(doc(firestoreDb, "userAnalytics", userId), {
-    totalMinutes: increment(durationMinutes),
-    lastActiveAt: serverTimestamp(),
-    lastActiveDateKey: dateKey(),
-    updatedAt: serverTimestamp(),
-  }).catch(() => {});
+  return undefined;
+}
+
+function isCommunityInterestEvent(eventType = "") {
+  return [
+    "open_section",
+    "open_post",
+    "open_article",
+    "open_course",
+    "open_meditation",
+    "open_book",
+    "ask_ganesha",
+    "search_content",
+    "finish_meditation",
+    "open_video",
+    "click_related_resource",
+    "open_content",
+  ].includes(eventType);
 }
 
 function eventTypeForContent(contentType) {
@@ -291,16 +321,16 @@ function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-function ensureSessionId() {
-  const current = sessionStorage.getItem(SESSION_KEY);
-  if (current) return current;
-  const next = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  sessionStorage.setItem(SESSION_KEY, next);
-  return next;
-}
-
 function trimText(value = "", max = 200) {
   return String(value || "").trim().slice(0, max);
+}
+
+function displayName(user, profile = {}) {
+  return trimText(profile.nombre || profile.displayName || user?.displayName || user?.email || "Usuario", 160);
+}
+
+function logPresenceError(error) {
+  console.warn("No se pudo actualizar presencia.", error);
 }
 
 function titleCase(value = "") {

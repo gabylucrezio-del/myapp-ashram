@@ -44,6 +44,14 @@ service cloud.firestore {
       return !data.keys().hasAny([field]) || data[field] is timestamp;
     }
 
+    function isOptionalMap(data, field) {
+      return !data.keys().hasAny([field]) || data[field] is map;
+    }
+
+    function isOptionalNumberOrNull(data, field) {
+      return !data.keys().hasAny([field]) || data[field] is number || data[field] == null;
+    }
+
     function ownsUserData(data) {
       return signedIn() && data.userId == request.auth.uid;
     }
@@ -113,6 +121,51 @@ service cloud.firestore {
       && isOptionalBool(data, 'isOnline')
       && isOptionalTimestamp(data, 'lastActiveAt')
       && isOptionalString(data, 'deviceType', 40);
+    }
+
+    function validUserProfile(data) {
+      return data.keys().hasOnly([
+        'uid', 'email', 'nombre', 'displayName', 'domicilio', 'telefono',
+        'localidad', 'codigo_postal', 'fecha_nacimiento', 'foto_url',
+        'foto_path', 'photoURL', 'edad', 'rol', 'fecha_registro',
+        'ultimo_ingreso', 'proveedor', 'suscripcion_estado',
+        'suscripcion_activa', 'permiso_biblioteca', 'permiso_meditacion',
+        'permiso_conocimientos', 'permiso_ejercicios',
+        'etiquetas_conocimiento', 'etiquetas_ejercicios',
+        'registeredAt', 'updatedAt'
+      ])
+      && data.uid == request.auth.uid
+      && isOptionalString(data, 'email', 180)
+      && isOptionalString(data, 'nombre', 180)
+      && isOptionalString(data, 'displayName', 180)
+      && isOptionalString(data, 'domicilio', 220)
+      && isOptionalString(data, 'telefono', 80)
+      && isOptionalString(data, 'localidad', 160)
+      && isOptionalString(data, 'codigo_postal', 40)
+      && isOptionalString(data, 'fecha_nacimiento', 40)
+      && isOptionalString(data, 'foto_url', 1000)
+      && isOptionalString(data, 'foto_path', 1000)
+      && isOptionalString(data, 'photoURL', 1000)
+      && isOptionalNumberOrNull(data, 'edad')
+      && isOptionalString(data, 'rol', 40)
+      && isOptionalString(data, 'fecha_registro', 80)
+      && isOptionalString(data, 'ultimo_ingreso', 80)
+      && isOptionalString(data, 'proveedor', 80)
+      && isOptionalString(data, 'suscripcion_estado', 80)
+      && isOptionalBool(data, 'suscripcion_activa')
+      && isOptionalBool(data, 'permiso_biblioteca')
+      && isOptionalBool(data, 'permiso_meditacion')
+      && isOptionalBool(data, 'permiso_conocimientos')
+      && isOptionalBool(data, 'permiso_ejercicios')
+      && isOptionalMap(data, 'etiquetas_conocimiento')
+      && isOptionalMap(data, 'etiquetas_ejercicios')
+      && isOptionalTimestamp(data, 'registeredAt')
+      && isOptionalTimestamp(data, 'updatedAt');
+    }
+
+    function validOwnUserProfile(data) {
+      return validUserProfile(data)
+        && (!data.keys().hasAny(['rol']) || data.rol == 'usuario');
     }
 
     function hasDocumentShape(data) {
@@ -279,9 +332,10 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAdmin() || (signedIn() && userId == request.auth.uid);
-      allow create, update: if signedIn()
+      allow create, update: if isAdmin()
+        || (signedIn()
         && userId == request.auth.uid
-        && validPresence(request.resource.data);
+        && validOwnUserProfile(request.resource.data));
       allow delete: if isAdmin();
     }
 

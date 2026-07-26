@@ -195,17 +195,29 @@ export default function TestDosha({ onBack }) {
                     <h3>{question.text}</h3>
                   </div>
                   <div className="dosha-option-grid">
-                    {["vata", "pitta", "kapha"].map((dosha) => (
-                      <button
-                        className={`dosha-option-card ${dosha} ${answers[id] === dosha ? "selected" : ""}`}
-                        key={dosha}
-                        type="button"
-                        onClick={() => choose(id, dosha)}
-                      >
-                        <strong>{DOSHAS[dosha].label}</strong>
-                        <span>{question.options[dosha]}</span>
-                      </button>
-                    ))}
+                    {["vata", "pitta", "kapha"].map((dosha) => {
+                      const optionId = `${id}-${dosha}`;
+                      return (
+                        <div
+                          className={`dosha-option-card ${dosha} ${answers[id] === dosha ? "selected" : ""}`}
+                          key={dosha}
+                        >
+                          <input
+                            id={optionId}
+                            type="radio"
+                            name={id}
+                            value={dosha}
+                            checked={answers[id] === dosha}
+                            onChange={() => choose(id, dosha)}
+                            aria-label={`Seleccionar ${DOSHAS[dosha].label}`}
+                          />
+                          <span className="dosha-option-content">
+                            <strong>{DOSHAS[dosha].label}</strong>
+                            <span>{question.options[dosha]}</span>
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </article>
               );

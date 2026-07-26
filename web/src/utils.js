@@ -140,6 +140,14 @@ export async function uploadOptimizedImage(file, folder) {
   return { url: await getDownloadURL(ref), path };
 }
 
+export async function uploadOptimizedCeremonialImage(file, folder = "config/ceremonial-sequences") {
+  const blob = await optimizeImageToWebp(file, 900, 0.78);
+  const path = `${folder}/${new Date().toISOString().slice(0, 10)}_${crypto.randomUUID()}.webp`;
+  const ref = storageRef(storage, path);
+  await uploadBytes(ref, blob, { contentType: "image/webp" });
+  return { url: await getDownloadURL(ref), path, contentType: "image/webp" };
+}
+
 export async function uploadPdf(file, folder) {
   if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
     throw new Error("El archivo debe ser PDF.");
@@ -172,4 +180,27 @@ export async function uploadAudio(file, folder) {
   const ref = storageRef(storage, path);
   await uploadBytes(ref, file, { contentType: "audio/mp4" });
   return { url: await getDownloadURL(ref), path };
+}
+
+export async function uploadCeremonialMedia(file, folder = "config/ceremonial-effects") {
+  const name = file.name.toLowerCase();
+  const allowed = [
+    { ext: ".gif", type: "image/gif" },
+    { ext: ".png", type: "image/png" },
+    { ext: ".jpg", type: "image/jpeg" },
+    { ext: ".jpeg", type: "image/jpeg" },
+    { ext: ".webp", type: "image/webp" },
+    { ext: ".mp4", type: "video/mp4" },
+    { ext: ".webm", type: "video/webm" },
+  ];
+  const match = allowed.find((item) => file.type === item.type || name.endsWith(item.ext));
+  if (!match) {
+    throw new Error("El archivo debe ser GIF, PNG, JPG, WEBP, MP4 o WEBM.");
+  }
+
+  const extension = match.ext.replace(".", "");
+  const path = `${folder}/${new Date().toISOString().slice(0, 10)}_${crypto.randomUUID()}.${extension}`;
+  const ref = storageRef(storage, path);
+  await uploadBytes(ref, file, { contentType: match.type });
+  return { url: await getDownloadURL(ref), path, contentType: match.type };
 }

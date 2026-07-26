@@ -68,6 +68,13 @@
   - Estetica movil calida, profesional y espiritual.
 - Estado: prototipo funcional web movil, listo para seguir puliendo y luego empaquetar como APK.
 
+## GanFlow
+- Tipo: App web local.
+- Carpeta: `ganflow/`.
+- Uso: tablero de flujo para ordenar proyectos, tareas, ideas y entregables.
+- Datos: guarda localmente en el navegador con `localStorage`.
+- Estado: prototipo inicial funcional.
+
 ## Experimentos
 - `teleprompter/`: prototipo web local del teleprompter.
 - `teleprompter_flet/`: prototipo Flet/Python del teleprompter.
