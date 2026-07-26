@@ -70,7 +70,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { deleteObject, ref as storageRef } from "firebase/storage";
+import { deleteObject, getBlob, ref as storageRef } from "firebase/storage";
 import { auth, db, firebaseConfig, firestoreDb, storage } from "./firebase";
 import BookStudio from "./BookStudio";
 import CuadernoAshram from "./CuadernoAshram";
@@ -2424,19 +2424,22 @@ function Tienda({ user, profile, onBack, onToast }) {
 
     if (navigator.share) {
       try {
-        const imageFile = await shareImageFile(productMainImage(product), productTitle);
-        const payload = {
-          title: productTitle,
-          text: shareText,
-          url: shareUrl,
-        };
+        const imageFile = await shareProductImageFile(product, productTitle);
         if (imageFile && navigator.canShare?.({ files: [imageFile] })) {
-          payload.files = [imageFile];
+          await navigator.share({
+            title: productTitle,
+            text: shareText,
+            files: [imageFile],
+          });
           shareMethod = "native_files";
         } else {
+          await navigator.share({
+            title: productTitle,
+            text: shareText,
+            url: shareUrl,
+          });
           shareMethod = "native";
         }
-        await navigator.share(payload);
         trackProductShare(product, shareMethod);
         return;
       } catch (error) {
@@ -6313,14 +6316,48 @@ async function shareImageFile(imageUrl, title = "ashram-ganesha") {
   try {
     const response = await fetch(imageUrl, { mode: "cors" });
     if (!response.ok) return null;
-    const blob = await response.blob();
-    if (!blob.type?.startsWith("image/")) return null;
-    const extension = blob.type.split("/")[1]?.split(";")[0] || "jpg";
-    const safeName = cleanFileName(title || "ashram-ganesha");
-    return new File([blob], `${safeName}.${extension}`, { type: blob.type });
+    return blobToShareFile(await response.blob(), title);
   } catch {
     return null;
   }
+}
+
+async function shareProductImageFile(product, title = "ashram-ganesha") {
+  if (typeof File === "undefined") return null;
+  const storagePaths = [
+    product?.imagen_path,
+    product?.imagenCatalogoPath,
+    product?.catalogo_imagen_path,
+  ].map(cleanText).filter(Boolean);
+
+  for (const path of storagePaths) {
+    try {
+      const file = blobToShareFile(await getBlob(storageRef(storage, path)), title);
+      if (file) return file;
+    } catch {
+      // Some older products only have a public URL; try that below.
+    }
+  }
+
+  const imageUrls = [
+    productMainImage(product),
+    product?.imagen,
+    product?.imagen_url,
+    product?.portada_url,
+  ].map(cleanText).filter(Boolean);
+
+  for (const imageUrl of [...new Set(imageUrls)]) {
+    const file = await shareImageFile(imageUrl, title);
+    if (file) return file;
+  }
+  return null;
+}
+
+function blobToShareFile(blob, title = "ashram-ganesha") {
+  if (!blob?.type?.startsWith("image/") || typeof File === "undefined") return null;
+  const extension = blob.type.split("/")[1]?.split(";")[0] || "jpg";
+  const safeName = cleanFileName(title || "ashram-ganesha");
+  return new File([blob], `${safeName}.${extension}`, { type: blob.type });
 }
 
 function cleanFileName(value) {
