@@ -2326,6 +2326,22 @@ function Tienda({ user, profile, onBack, onToast }) {
     localStorage.setItem("ashram-store-cart", JSON.stringify(cart));
   }, [cart]);
 
+  useEffect(() => {
+    if (loading || selectedProduct) return;
+    const linkedProductId = storeProductIdFromUrl();
+    if (!linkedProductId) return;
+    const linkedProduct = activeProducts.find((product) => product.id === linkedProductId);
+    if (!linkedProduct) return;
+    void trackEvent("product_view", {
+      contentType: "tienda",
+      contentId: linkedProduct.id,
+      contentTitle: productName(linkedProduct),
+      contentCategory: linkedProduct.categoria || "",
+      source: "deep_link",
+    });
+    setSelectedProduct(linkedProduct);
+  }, [loading, products, selectedProduct]);
+
   const cartItems = Object.entries(cart)
     .map(([id, quantity]) => {
       const product = products.find((item) => item.id === id);
@@ -2385,6 +2401,7 @@ function Tienda({ user, profile, onBack, onToast }) {
   }
 
   function openProduct(product) {
+    setStoreProductUrlParam(product.id);
     void trackEvent("product_view", {
       contentType: "tienda",
       contentId: product.id,
@@ -2392,6 +2409,48 @@ function Tienda({ user, profile, onBack, onToast }) {
       contentCategory: product.categoria || "",
     });
     setSelectedProduct(product);
+  }
+
+  function closeProduct() {
+    clearStoreProductUrlParam();
+    setSelectedProduct(null);
+  }
+
+  async function shareProduct(product) {
+    const productTitle = productName(product);
+    const shareUrl = storeProductShareUrl(product);
+    const shareText = storeProductShareText(product, shareUrl);
+    let shareMethod = "clipboard";
+
+    if (navigator.share) {
+      try {
+        const imageFile = await shareImageFile(productMainImage(product), productTitle);
+        const payload = {
+          title: productTitle,
+          text: shareText,
+          url: shareUrl,
+        };
+        if (imageFile && navigator.canShare?.({ files: [imageFile] })) {
+          payload.files = [imageFile];
+          shareMethod = "native_files";
+        } else {
+          shareMethod = "native";
+        }
+        await navigator.share(payload);
+        trackProductShare(product, shareMethod);
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+      }
+    }
+
+    const copied = await copyStoreShareText(shareText);
+    if (copied) {
+      onToast?.("Enlace del producto copiado.");
+      trackProductShare(product, shareMethod);
+    } else {
+      onToast?.("No se pudo copiar el enlace del producto.");
+    }
   }
 
   async function deleteStoreProduct(product) {
@@ -2768,7 +2827,7 @@ function Tienda({ user, profile, onBack, onToast }) {
         <ProductDetailModal
           product={selectedProduct}
           quantity={cart[selectedProduct.id] || 0}
-          onClose={() => setSelectedProduct(null)}
+          onClose={closeProduct}
           onAdd={(amount) => addProduct(selectedProduct, amount)}
           onWhatsapp={(amount) => {
             addProduct(selectedProduct, amount);
@@ -2778,6 +2837,7 @@ function Tienda({ user, profile, onBack, onToast }) {
           }}
           onOpenImage={(index) => openImage(selectedProduct, index)}
           onChangeQuantity={(delta) => changeQuantity(selectedProduct, delta)}
+          onShare={() => shareProduct(selectedProduct)}
         />
       ) : null}
       {lightbox ? (
@@ -2903,7 +2963,7 @@ function OfferingCard({ title, alias, holder, onCopy }) {
   );
 }
 
-function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, onChangeQuantity }) {
+function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, onChangeQuantity, onShare }) {
   const stock = productStock(product);
   const soldOut = productAvailability(product) === "agotado";
   const images = productDetailImages(product);
@@ -2986,6 +3046,9 @@ function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, on
             </div>
           ) : null}
           <div className="store-detail-actions">
+            <button className="store-share-product-button" type="button" onClick={onShare}>
+              <Share2 size={17} /> Compartir producto
+            </button>
             <button className="primary" type="button" disabled={soldOut} onClick={() => onAdd(detailQuantity)}>
               <ShoppingCart size={18} /> Agregar al carrito
             </button>
@@ -8210,6 +8273,76 @@ function productMainImage(product) {
   return productImages(product)[0];
 }
 
+function storeProductIdFromUrl() {
+  return cleanText(new URLSearchParams(window.location.search).get("producto"));
+}
+
+function storeProductShareUrl(product) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("producto", product.id);
+  url.hash = "tienda";
+  return url.toString();
+}
+
+function setStoreProductUrlParam(productId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("producto", productId);
+  url.hash = "tienda";
+  window.history.replaceState({ ...window.history.state, view: "tienda", producto: productId }, "", url.toString());
+}
+
+function clearStoreProductUrlParam() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("producto");
+  window.history.replaceState({ ...window.history.state, view: "tienda" }, "", `${url.pathname}${url.search}${url.hash || "#tienda"}`);
+}
+
+function storeProductShareText(product, shareUrl) {
+  const priceLine = productHasPrice(product) ? formatMoney(productPrice(product)) : "";
+  const descriptionLine = summary(product?.descripcion || "", 160);
+  return [
+    "Mirá este producto de Ashram Ganesha:",
+    productName(product),
+    priceLine,
+    descriptionLine,
+    shareUrl,
+  ].filter(Boolean).join("\n");
+}
+
+async function copyStoreShareText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the textarea fallback.
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+function trackProductShare(product, shareMethod) {
+  void trackEvent("store_product_shared", {
+    productId: product.id,
+    productName: productName(product),
+    category: product.categoria || "",
+    shareMethod,
+  });
+}
+
 function productDetailImage(product = {}) {
   return cleanText(
     product.imagen_detalle ||
@@ -9549,6 +9682,7 @@ function isCourseOpen(modules) {
 }
 
 function hashView() {
+  if (storeProductIdFromUrl()) return "tienda";
   const value = window.location.hash.replace("#", "").split("/")[0];
   return value || "home";
 }

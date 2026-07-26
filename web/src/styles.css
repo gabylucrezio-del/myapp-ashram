@@ -3174,6 +3174,28 @@ a.primary {
   background: linear-gradient(180deg, rgba(255, 253, 248, 0.72), #fffdf8 42%);
 }
 
+.store-share-product-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(143, 130, 76, 0.42);
+  border-radius: 8px;
+  background: #fff8e7;
+  color: #5e5a2e;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.store-share-product-button:hover,
+.store-share-product-button:focus-visible {
+  border-color: rgba(196, 152, 88, 0.75);
+  background: #fff3d1;
+  outline: none;
+}
+
 .whatsapp-button {
   display: inline-flex;
   align-items: center;
