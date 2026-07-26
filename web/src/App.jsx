@@ -2416,30 +2416,34 @@ function Tienda({ user, profile, onBack, onToast }) {
     setSelectedProduct(null);
   }
 
-  async function shareProduct(product) {
+  async function shareProduct(product, preparedImageFile = null) {
     const productTitle = productName(product);
     const shareUrl = storeProductShareUrl(product);
     const shareText = storeProductShareText(product, shareUrl);
     let shareMethod = "clipboard";
 
     if (navigator.share) {
-      try {
-        const imageFile = await shareProductImageFile(product, productTitle);
-        if (imageFile && navigator.canShare?.({ files: [imageFile] })) {
+      if (preparedImageFile && navigator.canShare?.({ files: [preparedImageFile] })) {
+        try {
           await navigator.share({
             title: productTitle,
             text: shareText,
-            files: [imageFile],
+            files: [preparedImageFile],
           });
-          shareMethod = "native_files";
-        } else {
-          await navigator.share({
-            title: productTitle,
-            text: shareText,
-            url: shareUrl,
-          });
-          shareMethod = "native";
+          trackProductShare(product, "native_files");
+          return;
+        } catch (error) {
+          if (error?.name === "AbortError") return;
         }
+      }
+
+      try {
+        await navigator.share({
+          title: productTitle,
+          text: shareText,
+          url: shareUrl,
+        });
+        shareMethod = "native";
         trackProductShare(product, shareMethod);
         return;
       } catch (error) {
@@ -2840,7 +2844,7 @@ function Tienda({ user, profile, onBack, onToast }) {
           }}
           onOpenImage={(index) => openImage(selectedProduct, index)}
           onChangeQuantity={(delta) => changeQuantity(selectedProduct, delta)}
-          onShare={() => shareProduct(selectedProduct)}
+          onShare={(preparedImageFile) => shareProduct(selectedProduct, preparedImageFile)}
         />
       ) : null}
       {lightbox ? (
@@ -2975,8 +2979,20 @@ function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, on
   const productDetails = productDetailFields(product);
   const trustTexts = productTrustTexts(product);
   const [detailQuantity, setDetailQuantity] = useState(1);
+  const [preparedShareImage, setPreparedShareImage] = useState(null);
   const description = truncateStoreDescription(product.descripcion);
   const productVideo = productVideoInfo(product);
+
+  useEffect(() => {
+    let alive = true;
+    setPreparedShareImage(null);
+    shareProductImageFile(product, productName(product)).then((file) => {
+      if (alive) setPreparedShareImage(file);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [product.id]);
 
   return createPortal(
     <div className="modal-backdrop store-product-backdrop">
@@ -3049,7 +3065,7 @@ function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, on
             </div>
           ) : null}
           <div className="store-detail-actions">
-            <button className="store-share-product-button" type="button" onClick={onShare}>
+            <button className="store-share-product-button" type="button" onClick={() => onShare(preparedShareImage)}>
               <Share2 size={17} /> Compartir producto
             </button>
             <button className="primary" type="button" disabled={soldOut} onClick={() => onAdd(detailQuantity)}>
