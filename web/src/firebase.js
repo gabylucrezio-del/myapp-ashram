@@ -16,12 +16,12 @@ export const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-const app = initializeApp(firebaseConfig);
+export const firebaseApp = initializeApp(firebaseConfig);
 
 export const analyticsPromise = isSupported()
-  .then((supported) => (supported && firebaseConfig.measurementId ? getAnalytics(app) : null))
+  .then((supported) => (supported && firebaseConfig.measurementId ? getAnalytics(firebaseApp) : null))
   .catch(() => null);
-export const auth = getAuth(app);
-export const db = getDatabase(app);
-export const firestoreDb = getFirestore(app);
-export const storage = getStorage(app);
+export const auth = getAuth(firebaseApp);
+export const db = getDatabase(firebaseApp);
+export const firestoreDb = getFirestore(firebaseApp);
+export const storage = getStorage(firebaseApp);

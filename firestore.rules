@@ -60,7 +60,8 @@ service cloud.firestore {
       return data.keys().hasOnly([
         'userId', 'eventType', 'contentId', 'contentTitle',
         'contentType', 'contentCategory', 'category', 'tags', 'keywords',
-        'question', 'searchQuery', 'detectedTopics', 'durationMinutes',
+        'question', 'searchQuery', 'detectedTopics', 'durationMinutes', 'productId', 'productName', 'shareMethod',
+        'imageAttached', 'shareUrl', 'value', 'quantity',
         'timestamp', 'dateKey', 'deviceType'
       ])
       && ownsUserData(data)
@@ -72,7 +73,9 @@ service cloud.firestore {
         'search_content', 'finish_meditation', 'open_video',
         'click_related_resource',
         'open_biblioteca', 'open_conocimiento', 'open_ejercicios',
-        'open_satsang', 'open_content'
+        'open_satsang', 'open_content', 'store_view', 'product_view', 'store_product_shared',
+        'whatsapp_order_click', 'whatsapp_order_confirmed', 'begin_checkout',
+        'add_to_cart'
       ].hasAny([data.eventType])
       && isOptionalString(data, 'contentId', 180)
       && isOptionalString(data, 'contentTitle', 220)
@@ -87,6 +90,13 @@ service cloud.firestore {
       && isOptionalList(data, 'tags', 20)
       && isOptionalList(data, 'keywords', 20)
       && isOptionalInt(data, 'durationMinutes')
+      && isOptionalString(data, 'productId', 180)
+      && isOptionalString(data, 'productName', 220)
+      && isOptionalString(data, 'shareMethod', 80)
+      && isOptionalBool(data, 'imageAttached')
+      && isOptionalString(data, 'shareUrl', 500)
+      && isOptionalNumberOrNull(data, 'value')
+      && isOptionalNumberOrNull(data, 'quantity')
       && isOptionalTimestamp(data, 'timestamp');
     }
 
@@ -337,6 +347,18 @@ service cloud.firestore {
         && userId == request.auth.uid
         && validOwnUserProfile(request.resource.data));
       allow delete: if isAdmin();
+    }
+
+    match /adminNotificationTokens/{tokenId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /adminNotificationEvents/{eventId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /weeklyStoreReports/{reportId} {
+      allow read, write: if isAdmin();
     }
 
     match /analyticsStats/{statId} {

@@ -86,6 +86,12 @@ import {
   startAnalyticsSession,
 } from "./analyticsService";
 import {
+  disableAdminNotifications,
+  enableAdminNotifications,
+  listenForegroundNotifications,
+  notificationSupportState,
+} from "./notificationService";
+import {
   cleanText,
   downloadUrl,
   firebaseKey,
@@ -2224,6 +2230,7 @@ function Tienda({ user, profile, onBack, onToast }) {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [storeEditing, setStoreEditing] = useState(null);
+  const [shareMenuProduct, setShareMenuProduct] = useState(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState(1);
   const [buyer, setBuyer] = useState(() => readStoreBuyer(profile, user));
@@ -2421,30 +2428,23 @@ function Tienda({ user, profile, onBack, onToast }) {
     const shareUrl = storeProductShareUrl(product);
     const shareText = storeProductShareText(product, shareUrl);
     let shareMethod = "clipboard";
+    let imageAttached = false;
 
     if (navigator.share) {
       if (preparedImageFile && navigator.canShare?.({ files: [preparedImageFile] })) {
         try {
-          await navigator.share({
-            title: productTitle,
-            text: shareText,
-            files: [preparedImageFile],
-          });
-          trackProductShare(product, "native_files");
+          await navigator.share({ title: productTitle, text: shareText, files: [preparedImageFile] });
+          imageAttached = true;
+          trackProductShare(product, "native_files", true, shareUrl);
           return;
         } catch (error) {
           if (error?.name === "AbortError") return;
         }
       }
-
       try {
-        await navigator.share({
-          title: productTitle,
-          text: shareText,
-          url: shareUrl,
-        });
+        await navigator.share({ title: productTitle, text: shareText, url: shareUrl });
         shareMethod = "native";
-        trackProductShare(product, shareMethod);
+        trackProductShare(product, shareMethod, imageAttached, shareUrl);
         return;
       } catch (error) {
         if (error?.name === "AbortError") return;
@@ -2454,10 +2454,52 @@ function Tienda({ user, profile, onBack, onToast }) {
     const copied = await copyStoreShareText(shareText);
     if (copied) {
       onToast?.("Enlace del producto copiado.");
-      trackProductShare(product, shareMethod);
+      trackProductShare(product, shareMethod, imageAttached, shareUrl);
     } else {
       onToast?.("No se pudo copiar el enlace del producto.");
     }
+  }
+
+  function openProductShareMenu(product) {
+    setShareMenuProduct(product);
+  }
+
+  function shareProductWhatsapp(product) {
+    const shareUrl = storeProductShareUrl(product);
+    const shareText = storeProductShareText(product, shareUrl);
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank", "noopener,noreferrer");
+    trackProductShare(product, "whatsapp", false, shareUrl);
+  }
+
+  async function copyProductShareLink(product) {
+    const shareUrl = storeProductShareUrl(product);
+    const copied = await copyStoreShareText(storeProductShareText(product, shareUrl));
+    onToast?.(copied ? "Enlace del producto copiado." : "No se pudo copiar el enlace.");
+    if (copied) trackProductShare(product, "clipboard", false, shareUrl);
+  }
+
+  async function saveProductShareImage(product, preparedImageFile = null) {
+    const file = preparedImageFile || await shareProductImageFile(product, productName(product));
+    if (file) {
+      downloadBlobFile(file, cleanFileName(productName(product)) || "producto-ashram");
+      await copyProductShareLink(product);
+      onToast?.("Tu aplicación no admite compartir la imagen directamente. La guardé para que puedas publicarla.");
+      trackProductShare(product, "save_image", true, storeProductShareUrl(product));
+      return;
+    }
+    const imageUrl = productMainImage(product);
+    if (imageUrl) {
+      const link = document.createElement("a");
+      link.href = imageUrl;
+      link.download = `${cleanFileName(productName(product)) || "producto-ashram"}.jpg`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.click();
+      await copyProductShareLink(product);
+      onToast?.("Abrí la imagen y copié el enlace del producto.");
+      return;
+    }
+    onToast?.("Este producto no tiene imagen para guardar.");
   }
 
   async function deleteStoreProduct(product) {
@@ -2845,6 +2887,17 @@ function Tienda({ user, profile, onBack, onToast }) {
           onOpenImage={(index) => openImage(selectedProduct, index)}
           onChangeQuantity={(delta) => changeQuantity(selectedProduct, delta)}
           onShare={(preparedImageFile) => shareProduct(selectedProduct, preparedImageFile)}
+          onOpenShareMenu={() => openProductShareMenu(selectedProduct)}
+        />
+      ) : null}
+      {shareMenuProduct ? (
+        <ProductShareMenu
+          product={shareMenuProduct}
+          onClose={() => setShareMenuProduct(null)}
+          onShareImage={(preparedImageFile) => shareProduct(shareMenuProduct, preparedImageFile)}
+          onWhatsapp={() => shareProductWhatsapp(shareMenuProduct)}
+          onSaveImage={(preparedImageFile) => saveProductShareImage(shareMenuProduct, preparedImageFile)}
+          onCopy={() => copyProductShareLink(shareMenuProduct)}
         />
       ) : null}
       {lightbox ? (
@@ -2970,7 +3023,7 @@ function OfferingCard({ title, alias, holder, onCopy }) {
   );
 }
 
-function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, onChangeQuantity, onShare }) {
+function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, onChangeQuantity, onShare, onOpenShareMenu }) {
   const stock = productStock(product);
   const soldOut = productAvailability(product) === "agotado";
   const images = productDetailImages(product);
@@ -3065,7 +3118,7 @@ function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, on
             </div>
           ) : null}
           <div className="store-detail-actions">
-            <button className="store-share-product-button" type="button" onClick={() => onShare(preparedShareImage)}>
+            <button className="store-share-product-button" type="button" onClick={onOpenShareMenu}>
               <Share2 size={17} /> Compartir producto
             </button>
             <button className="primary" type="button" disabled={soldOut} onClick={() => onAdd(detailQuantity)}>
@@ -3073,6 +3126,50 @@ function ProductDetailModal({ product, quantity, onClose, onAdd, onOpenImage, on
             </button>
           </div>
         </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function ProductShareMenu({ product, onClose, onShareImage, onWhatsapp, onSaveImage, onCopy }) {
+  const [preparedShareImage, setPreparedShareImage] = useState(null);
+  const [imageState, setImageState] = useState("Preparando imagen...");
+
+  useEffect(() => {
+    let alive = true;
+    shareProductImageFile(product, productName(product)).then((file) => {
+      if (!alive) return;
+      setPreparedShareImage(file);
+      setImageState(file ? "Imagen lista para compartir." : "Tu app puede usar texto, enlace o guardar imagen.");
+    });
+    return () => {
+      alive = false;
+    };
+  }, [product.id]);
+
+  return createPortal(
+    <div className="modal-backdrop store-share-menu-backdrop" onMouseDown={onClose}>
+      <section className="store-share-menu" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Compartir producto">
+        <header>
+          <span>
+            <strong>Compartir producto</strong>
+            <small>{productName(product)}</small>
+          </span>
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="Cerrar"><X size={18} /></button>
+        </header>
+        <img src={productMainImage(product)} alt="" />
+        <small>{imageState}</small>
+        <button className="primary" type="button" onClick={() => onShareImage(preparedShareImage)}>
+          <Share2 size={17} /> Compartir imagen y producto
+        </button>
+        <button className="ghost" type="button" onClick={onWhatsapp}>Compartir por WhatsApp</button>
+        <button className="ghost" type="button" onClick={() => onSaveImage(preparedShareImage)}>
+          <Download size={17} /> Guardar imagen
+        </button>
+        <button className="ghost" type="button" onClick={onCopy}>
+          <Copy size={17} /> Copiar enlace
+        </button>
       </section>
     </div>,
     document.body,
@@ -4749,6 +4846,7 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
   return (
     <section className="content-page">
       <PageTitle icon={Shield} title="Administracion" subtitle="Cuida los contenidos que sostienen la practica." onBack={onBack} />
+      <AdminNotificationSettings onToast={onToast} />
       <div className="tabs">
         {adminSections.map(({ id, label }) => (
           <button key={id} className={section === id ? "active" : ""} onClick={() => { setSection(id); setEditing(null); }}>
@@ -4859,6 +4957,66 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
         </div>
       )}
       {shareDraft ? <SharePromoModal draft={shareDraft} onClose={() => setShareDraft(null)} onToast={onToast} /> : null}
+    </section>
+  );
+}
+
+function AdminNotificationSettings({ onToast }) {
+  const [state, setState] = useState({ status: "checking", label: "Revisando..." });
+  const [busy, setBusy] = useState(false);
+  const user = auth.currentUser;
+
+  useEffect(() => {
+    notificationSupportState().then(setState);
+    let unsubscribe = () => {};
+    listenForegroundNotifications((notification) => {
+      onToast?.(`${notification.title}: ${notification.body}`);
+      if (notification.data?.route) window.history.pushState({ view: notification.data.route }, "", notification.data.route);
+    }).then((stop) => {
+      unsubscribe = stop || (() => {});
+    });
+    return () => unsubscribe();
+  }, []);
+
+  async function enable() {
+    setBusy(true);
+    try {
+      const next = await enableAdminNotifications(user);
+      setState(next);
+      onToast?.("Notificaciones activadas.");
+    } catch (error) {
+      onToast?.(error.message || "No se pudieron activar las notificaciones.");
+      setState(await notificationSupportState());
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setBusy(true);
+    try {
+      const next = await disableAdminNotifications(user);
+      setState(next);
+      onToast?.("Notificaciones desactivadas.");
+    } catch (error) {
+      onToast?.(error.message || "No se pudieron desactivar las notificaciones.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="admin-push-card">
+      <span>
+        <strong>Notificaciones push</strong>
+        <small>Estado: {state.label}. Se solicitan solo cuando el administrador toca activar.</small>
+      </span>
+      <div>
+        <button className="primary small" type="button" onClick={enable} disabled={busy || state.status === "enabled" || state.status === "blocked" || state.status === "not-configured"}>
+          <Bell size={15} /> Activar notificaciones
+        </button>
+        <button className="ghost compact" type="button" onClick={disable} disabled={busy || state.status !== "enabled"}>Desactivar</button>
+      </div>
     </section>
   );
 }
@@ -5969,6 +6127,9 @@ function AnalyticsDashboard() {
   const [dailyStats, setDailyStats] = useState([]);
   const [diagnostics, setDiagnostics] = useState(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
+  const [weeklyReports, setWeeklyReports] = useState([]);
+  const [selectedReportId, setSelectedReportId] = useState("");
+  const [generatingReport, setGeneratingReport] = useState(false);
 
   useEffect(() => {
     const unsubscribers = [
@@ -5994,6 +6155,11 @@ function AnalyticsDashboard() {
       onSnapshot(query(collection(firestoreDb, "dailyInterestStats"), orderBy("dateKey", "desc"), limit(7)), (snap) => {
         setDailyStats(snap.docs.map((item) => ({ id: item.id, ...item.data() })).reverse());
       }, analyticsReadError(setDiagnosticsError)),
+      onSnapshot(query(collection(firestoreDb, "weeklyStoreReports"), orderBy("generatedAt", "desc"), limit(12)), (snap) => {
+        const reports = snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+        setWeeklyReports(reports);
+        setSelectedReportId((current) => current || reports[0]?.id || "");
+      }, analyticsReadError(setDiagnosticsError)),
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
@@ -6005,6 +6171,26 @@ function AnalyticsDashboard() {
   const sectionStats = contentStats.filter((item) => item.eventType === "open_section").slice(0, 8);
   const contentVisits = contentStats.filter((item) => item.eventType !== "open_section").slice(0, 8);
   const ganeshaTopics = topicStats.filter((item) => !["Ganesha", "Guia", "Ashram"].includes(analyticsItemTitle(item))).slice(0, 8);
+  const selectedReport = weeklyReports.find((report) => report.id === selectedReportId) || weeklyReports[0] || null;
+
+  async function generateTestReport() {
+    setGeneratingReport(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Necesitas iniciar sesion.");
+      const token = await user.getIdToken();
+      const response = await fetch("/api/generate-weekly-store-report", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "No se pudo generar el reporte.");
+    } catch (error) {
+      setDiagnosticsError(error.message || "No se pudo generar el reporte.");
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
 
   return (
     <div className="analytics-dashboard">
@@ -6021,6 +6207,14 @@ function AnalyticsDashboard() {
       <section className="analytics-privacy-note">
         El Ashram utiliza estadisticas generales y anonimas para comprender que contenidos son mas utiles y mejorar la experiencia de la comunidad.
       </section>
+      <WeeklyStoreReportCard
+        reports={weeklyReports}
+        selectedId={selectedReportId}
+        setSelectedId={setSelectedReportId}
+        report={selectedReport}
+        generating={generatingReport}
+        onGenerate={generateTestReport}
+      />
       <div className="analytics-grid">
         <AnalyticsRanking title="Lo mas consultado en Ganesha Guia" icon={MessageCircle} items={questionStats.slice(0, 8)} />
         <AnalyticsRanking title="Temas que mas aparecen" icon={Leaf} items={ganeshaTopics} />
@@ -6041,6 +6235,39 @@ function AnalyticsDashboard() {
         <AnalyticsRanking title="Categorias con mas interes" icon={Library} items={categoryStats.slice(0, 8)} />
       </div>
     </div>
+  );
+}
+
+function WeeklyStoreReportCard({ reports, selectedId, setSelectedId, report, generating, onGenerate }) {
+  const metrics = report?.metrics || {};
+  return (
+    <section className="analytics-card analytics-wide weekly-report-card">
+      <div className="admin-list-head">
+        <strong>Reporte semanal</strong>
+        <small>Resumen de tienda generado cada domingo a las 20:00.</small>
+      </div>
+      <div className="weekly-report-toolbar">
+        <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)} disabled={!reports.length}>
+          {reports.length ? reports.map((item) => <option key={item.id} value={item.id}>{item.id}</option>) : <option>Sin reportes</option>}
+        </select>
+        <button className="primary small" type="button" onClick={onGenerate} disabled={generating}>{generating ? "Generando..." : "Generar reporte de prueba"}</button>
+      </div>
+      {!report ? <p className="empty-state">Todavia no hay reportes semanales.</p> : null}
+      {report ? (
+        <>
+          <p>{report.summaryText || "Reporte generado sin resumen."}</p>
+          <div className="weekly-report-metrics">
+            <span>Visitas tienda <strong>{metrics.storeViews ?? "sin dato"}</strong></span>
+            <span>Productos abiertos <strong>{metrics.productViews ?? "sin dato"}</strong></span>
+            <span>Compartidos <strong>{metrics.productShares ?? "sin dato"}</strong></span>
+            <span>WhatsApp <strong>{metrics.whatsappClicks ?? "sin dato"}</strong></span>
+            <span>Pedidos <strong>{metrics.ordersCreated ?? "sin dato"}</strong></span>
+            <span>Mensajes <strong>{metrics.messagesReceived ?? "sin dato"}</strong></span>
+          </div>
+          {report.topProducts?.length ? <AnalyticsRanking title="Productos mas vistos" icon={ShoppingBag} items={report.topProducts} /> : null}
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -6374,6 +6601,17 @@ function blobToShareFile(blob, title = "ashram-ganesha") {
   const extension = blob.type.split("/")[1]?.split(";")[0] || "jpg";
   const safeName = cleanFileName(title || "ashram-ganesha");
   return new File([blob], `${safeName}.${extension}`, { type: blob.type });
+}
+
+function downloadBlobFile(file, name = "ashram-ganesha") {
+  const objectUrl = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `${name}.${file.type?.split("/")[1] || "jpg"}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
 function cleanFileName(value) {
@@ -8331,10 +8569,9 @@ function storeProductIdFromUrl() {
 }
 
 function storeProductShareUrl(product) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("producto", product.id);
-  url.hash = "tienda";
-  return url.toString();
+  const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const origin = isLocalHost ? "https://ashramganesha.web.app" : window.location.origin || "https://ashramganesha.web.app";
+  return `${origin}/producto/${encodeURIComponent(product.id)}`;
 }
 
 function setStoreProductUrlParam(productId) {
@@ -8387,12 +8624,18 @@ async function copyStoreShareText(text) {
   }
 }
 
-function trackProductShare(product, shareMethod) {
+function trackProductShare(product, shareMethod, imageAttached = false, shareUrl = storeProductShareUrl(product)) {
   void trackEvent("store_product_shared", {
     productId: product.id,
     productName: productName(product),
+    contentId: product.id,
+    contentTitle: productName(product),
+    contentType: "tienda",
     category: product.categoria || "",
+    contentCategory: product.categoria || "",
     shareMethod,
+    imageAttached,
+    shareUrl,
   });
 }
 

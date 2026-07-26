@@ -12967,3 +12967,75 @@ a.primary {
 
 
 
+
+
+.admin-push-card,
+.store-share-menu,
+.weekly-report-card {
+  border: 1px solid rgba(216, 199, 160, 0.74);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.94);
+  box-shadow: 0 10px 24px rgba(69, 58, 34, 0.08);
+}
+
+.admin-push-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.admin-push-card > div,
+.weekly-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.store-share-menu-backdrop {
+  z-index: 80;
+}
+
+.store-share-menu {
+  width: min(360px, calc(100vw - 24px));
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  color: #3f3a20;
+}
+
+.store-share-menu header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.store-share-menu img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #fff8e7;
+}
+
+.weekly-report-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.weekly-report-metrics span {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff8e7;
+  color: #5e5a2e;
+  font-size: 12px;
+}
+
+.weekly-report-metrics strong {
+  color: var(--sacred-violet);
+  font-size: 18px;
+}

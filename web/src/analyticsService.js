@@ -93,6 +93,13 @@ export async function trackEvent(eventType, payload = {}) {
     searchQuery: trimText(payload.searchQuery || "", 180),
     detectedTopics: topics,
     durationMinutes: Number(payload.durationMinutes || 0),
+    productId: payload.productId || payload.contentId || "",
+    productName: trimText(payload.productName || payload.contentTitle || "", 180),
+    shareMethod: trimText(payload.shareMethod || "", 80),
+    imageAttached: Boolean(payload.imageAttached),
+    shareUrl: trimText(payload.shareUrl || "", 500),
+    value: Number(payload.value || 0),
+    quantity: Number(payload.quantity || 0),
     dateKey: dateKey(),
     deviceType: deviceType(),
   };
@@ -249,6 +256,13 @@ function isCommunityInterestEvent(eventType = "") {
     "open_video",
     "click_related_resource",
     "open_content",
+    "store_view",
+    "product_view",
+    "store_product_shared",
+    "whatsapp_order_click",
+    "whatsapp_order_confirmed",
+    "begin_checkout",
+    "add_to_cart",
   ].includes(eventType);
 }
 

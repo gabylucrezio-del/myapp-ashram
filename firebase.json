@@ -74,6 +74,14 @@
         "function": "deleteUserAccount"
       },
       {
+        "source": "/producto/**",
+        "function": "productSharePage"
+      },
+      {
+        "source": "/api/generate-weekly-store-report",
+        "function": "generateWeeklyStoreReportTest"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

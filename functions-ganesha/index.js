@@ -2,6 +2,9 @@ const admin = require("firebase-admin");
 const {setGlobalOptions} = require("firebase-functions");
 const {defineSecret} = require("firebase-functions/params");
 const {onRequest} = require("firebase-functions/https");
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {onValueCreated} = require("firebase-functions/v2/database");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 
 admin.initializeApp({
@@ -515,6 +518,140 @@ exports.analyticsDiagnostics = onRequest({
   }
 });
 
+exports.productSharePage = onRequest({
+  timeoutSeconds: 20,
+  memory: "256MiB",
+  invoker: "public",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (req, res) => {
+  try {
+    const productId = decodeURIComponent(String(req.path || req.url || "")
+        .split("/").filter(Boolean).pop() || "");
+    const productSnap = productId ?
+      await admin.database().ref(`productos/${productId}`).once("value") :
+      null;
+    const product = productSnap?.val() || null;
+    const origin = publicOrigin(req);
+    const title = product ? productNameBackend(product) : "Ashram Ganesha";
+    const price = product && productPriceBackend(product) ?
+      formatMoneyBackend(productPriceBackend(product)) :
+      "";
+    const description = product ?
+      [price, limitText(product.descripcion || "", 160)].filter(Boolean)
+          .join(" - ") :
+      "Tienda, cursos, biblioteca, meditaciones y comunidad.";
+    const image = absolutePublicImageUrl(
+        productMainImageBackend(product),
+        origin,
+    );
+    const pageUrl = productId ?
+      `${origin}/producto/${encodeURIComponent(productId)}` :
+      origin;
+    const appUrl = productId ?
+      `${origin}/?producto=${encodeURIComponent(productId)}#tienda` :
+      `${origin}/#tienda`;
+
+    res.set("Cache-Control", "public, max-age=300, s-maxage=300");
+    res.status(200).send(productShareHtml({
+      title,
+      description,
+      image,
+      pageUrl,
+      appUrl,
+      exists: Boolean(product),
+    }));
+  } catch (error) {
+    logger.error("productSharePage error", error);
+    res.status(500).send("Ashram Ganesha");
+  }
+});
+
+exports.onLiveMessageCreated = onDocumentCreated({
+  document: "enVivoMensajes/{messageId}",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (event) => {
+  const message = event.data?.data() || {};
+  if (ADMIN_EMAILS.has(String(message.email || ""))) return;
+  await sendAdminNotificationOnce({
+    eventId: `message-${event.params.messageId}`,
+    type: "message",
+    title: `Nuevo mensaje de ${limitText(
+        message.nombre || "la comunidad",
+        40,
+    )}`,
+    body: limitText(message.texto || "Mensaje recibido en el Ashram.", 90),
+    route: "/#en-vivo",
+    id: event.params.messageId,
+  });
+});
+
+exports.onStoreOrderCreated = onValueCreated({
+  ref: "/pedidos/{orderId}",
+  instance: "ashramganesha-default-rtdb",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (event) => {
+  await sendAdminNotificationOnce({
+    eventId: `order-${event.params.orderId}`,
+    type: "order",
+    title: "Tenés un nuevo pedido en la tienda",
+    body: "Abrí la tienda para revisar el detalle del pedido.",
+    route: "/#tienda",
+    id: event.params.orderId,
+  });
+});
+
+exports.onSessionRequestCreated = onValueCreated({
+  ref: "/sesiones/{sessionId}",
+  instance: "ashramganesha-default-rtdb",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (event) => {
+  const session = event.data.val() || {};
+  if (session.estado && session.estado !== "solicitado") return;
+  await sendAdminNotificationOnce({
+    eventId: `session-${event.params.sessionId}`,
+    type: "session",
+    title: "Nueva solicitud de turno",
+    body: `${limitText(session.nombre || "Alumno", 40)} pidió una sesión.`,
+    route: "/#sesiones",
+    id: event.params.sessionId,
+  });
+});
+
+exports.generateWeeklyStoreReport = onSchedule({
+  schedule: "0 20 * * 0",
+  timeZone: "America/Argentina/Buenos_Aires",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async () => {
+  await generateAndStoreWeeklyReport();
+});
+
+exports.generateWeeklyStoreReportTest = onRequest({
+  timeoutSeconds: 60,
+  memory: "512MiB",
+  invoker: "public",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (req, res) => {
+  setCorsHeaders(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "POST") {
+    res.status(405).json({error: "Metodo no permitido."});
+    return;
+  }
+  try {
+    await verifyAdminRequest(req);
+    const report = await generateAndStoreWeeklyReport();
+    res.json({ok: true, report});
+  } catch (error) {
+    logger.error("generateWeeklyStoreReportTest error", error);
+    res.status(error.status || 500).json({
+      error: error.message || "No se pudo generar el reporte.",
+    });
+  }
+});
+
 exports.deleteUserAccount = onRequest({
   timeoutSeconds: 30,
   memory: "256MiB",
@@ -741,6 +878,14 @@ function normalizeAnalyticsEvent(body = {}, decoded = {}) {
     timestamp: admin.firestore.FieldValue.serverTimestamp(),
     dateKey: cleanText(body.dateKey || todayKey()).slice(0, 20),
     deviceType: cleanText(body.deviceType || "").slice(0, 40),
+    productId: cleanText(body.productId || body.contentId || "").slice(0, 180),
+    productName: cleanText(body.productName || body.contentTitle || "")
+        .slice(0, 220),
+    shareMethod: cleanText(body.shareMethod || "").slice(0, 80),
+    imageAttached: Boolean(body.imageAttached),
+    shareUrl: cleanText(body.shareUrl || "").slice(0, 500),
+    value: Math.max(0, Number(body.value || 0)),
+    quantity: Math.max(0, Number(body.quantity || 0)),
   };
 }
 
@@ -2265,8 +2410,273 @@ function limitText(value = "", maxLength) {
   return `${clean.slice(0, maxLength - 3).replace(/\s+\S*$/, "")}...`;
 }
 
+async function sendAdminNotificationOnce({
+  eventId,
+  type,
+  title,
+  body,
+  route,
+  id,
+}) {
+  const firestore = admin.firestore();
+  try {
+    await firestore.collection("adminNotificationEvents").doc(eventId).create({
+      type,
+      id,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    if (error.code === 6 ||
+        String(error.message || "").includes("ALREADY_EXISTS")) {
+      return;
+    }
+    throw error;
+  }
+  await sendAdminPush({eventId, type, title, body, route, id});
+}
+
+async function sendAdminPush({eventId, type, title, body, route, id}) {
+  const firestore = admin.firestore();
+  const snap = await firestore.collection("adminNotificationTokens")
+      .where("enabled", "==", true)
+      .limit(500)
+      .get();
+  const docs = snap.docs;
+  const tokens = docs.map((doc) => cleanText(doc.data().token))
+      .filter(Boolean);
+  if (!tokens.length) return;
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens,
+    notification: {title, body},
+    data: {
+      eventId: cleanText(eventId),
+      type: cleanText(type),
+      id: cleanText(id),
+      route: cleanText(route || "/#admin"),
+    },
+    webpush: {
+      fcmOptions: {
+        link: `https://ashramganesha.web.app${route || "/#admin"}`,
+      },
+    },
+  });
+  await Promise.all(response.responses.map((result, index) => {
+    if (result.success) return null;
+    const code = result.error?.code || "";
+    if (code.includes("registration-token-not-registered") ||
+        code.includes("invalid-registration-token")) {
+      return docs[index].ref.delete();
+    }
+    logger.warn("No se pudo enviar push admin", result.error);
+    return null;
+  }));
+}
+
+async function generateAndStoreWeeklyReport() {
+  const firestore = admin.firestore();
+  const realtime = admin.database();
+  const end = new Date();
+  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const previousStart = new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const [eventsSnap, previousEventsSnap, pedidosSnap, messagesSnap] =
+    await Promise.all([
+      firestore.collection("analyticsEvents")
+          .where("timestamp", ">=", start)
+          .where("timestamp", "<=", end)
+          .get(),
+      firestore.collection("analyticsEvents")
+          .where("timestamp", ">=", previousStart)
+          .where("timestamp", "<", start)
+          .get(),
+      realtime.ref("pedidos").once("value"),
+      firestore.collection("enVivoMensajes")
+          .where("createdAt", ">=", start)
+          .where("createdAt", "<=", end)
+          .get()
+          .catch(() => ({size: 0})),
+    ]);
+  const events = eventsSnap.docs.map((doc) => doc.data() || {});
+  const previousEvents = previousEventsSnap.docs.map((doc) => doc.data() || {});
+  const orders = Object.entries(pedidosSnap.val() || {})
+      .map(([id, item]) => ({id, ...item}))
+      .filter((item) => {
+        const date = new Date(item.fecha || item.createdAt || 0);
+        return !Number.isNaN(date.getTime()) && date >= start && date <= end;
+      });
+  const metrics = reportMetrics(events, orders, messagesSnap.size || 0);
+  const previousMetrics = reportMetrics(previousEvents, [], 0);
+  const topProducts = topProductsFromEvents(events);
+  const comparison = {
+    storeViews: metrics.storeViews - previousMetrics.storeViews,
+    productViews: metrics.productViews - previousMetrics.productViews,
+    productShares: metrics.productShares - previousMetrics.productShares,
+    whatsappClicks: metrics.whatsappClicks - previousMetrics.whatsappClicks,
+  };
+  const reportId = weekId(end);
+  const summaryText = `Reporte semanal de la tienda: ${metrics.storeViews} ` +
+    `visitas, ${metrics.whatsappClicks} consultas y ` +
+    `${metrics.ordersCreated} pedidos.`;
+  const report = {
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
+    generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    metrics,
+    topProducts,
+    comparison,
+    summaryText,
+  };
+  await firestore.collection("weeklyStoreReports").doc(reportId)
+      .set(report, {merge: true});
+  await sendAdminPush({
+    eventId: `weekly-report-${reportId}`,
+    type: "weekly_report",
+    title: "Reporte semanal de la tienda",
+    body: summaryText,
+    route: "/#admin",
+    id: reportId,
+  });
+  return {...report, id: reportId};
+}
+
+function reportMetrics(events = [], orders = [], messagesReceived = 0) {
+  const count = (eventType) =>
+    events.filter((event) => event.eventType === eventType).length;
+  const totalSold = orders.reduce((sum, order) =>
+    sum + Number(order.total || 0), 0);
+  return {
+    sessions: new Set(events.map((event) => event.userHash)
+        .filter(Boolean)).size,
+    storeViews: count("store_view"),
+    productViews: count("product_view"),
+    searches: count("search_content"),
+    productShares: count("store_product_shared"),
+    whatsappClicks: count("whatsapp_order_click"),
+    ordersCreated: orders.length,
+    ordersConfirmed: count("whatsapp_order_confirmed"),
+    totalSold,
+    messagesReceived,
+  };
+}
+
+function topProductsFromEvents(events = []) {
+  const map = new Map();
+  events.filter((event) => event.eventType === "product_view")
+      .forEach((event) => {
+        const id = event.productId || event.contentId ||
+          event.contentTitle || "producto";
+        const old = map.get(id) || {
+          id,
+          title: event.productName || event.contentTitle || "Producto",
+          category: event.category || event.contentCategory || "Tienda",
+          count: 0,
+        };
+        old.count += 1;
+        map.set(id, old);
+      });
+  return [...map.values()].sort((a, b) => b.count - a.count).slice(0, 8);
+}
+
+function weekId(date) {
+  const first = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const days = Math.floor((date - first) / 86400000);
+  const week = Math.ceil((days + first.getUTCDay() + 1) / 7);
+  return `${date.getUTCFullYear()}-${String(week).padStart(2, "0")}`;
+}
+
+function productShareHtml({
+  title,
+  description,
+  image,
+  pageUrl,
+  appUrl,
+  exists,
+}) {
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<link rel="canonical" href="${escapeHtml(pageUrl)}">
+<meta property="og:type" content="product">
+<meta property="og:site_name" content="Ashram Ganesha">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(description)}">
+<meta property="og:image" content="${escapeHtml(image)}">
+<meta property="og:url" content="${escapeHtml(pageUrl)}">
+<meta name="twitter:card" content="summary_large_image">
+<meta http-equiv="refresh" content="1;url=${escapeHtml(appUrl)}">
+</head>
+<body>
+<main>
+<h1>${escapeHtml(title)}</h1>
+<p>${escapeHtml(description)}</p>
+<p><a href="${escapeHtml(appUrl)}">${exists ? "Abrir producto" :
+    "Abrir Ashram Ganesha"}</a></p>
+</main>
+<script>
+setTimeout(function(){
+  location.replace(${JSON.stringify(appUrl)});
+},700);
+</script>
+</body>
+</html>`;
+}
+
+function publicOrigin(req) {
+  const proto = req.get("x-forwarded-proto") || "https";
+  const host = req.get("x-forwarded-host") ||
+    req.get("host") ||
+    "ashramganesha.web.app";
+  return `${proto}://${host}`;
+}
+
+function productNameBackend(product = {}) {
+  return cleanText(product.nombre || product.titulo || "Producto del Ashram");
+}
+
+function productPriceBackend(product = {}) {
+  const raw = String(product.precio || "")
+      .replace(/[^0-9,.-]/g, "")
+      .replace(",", ".");
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function formatMoneyBackend(value) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function productMainImageBackend(product = {}) {
+  return cleanText(product.imagen ||
+    product.imagen_url ||
+    product.portada_url ||
+    product.foto ||
+    "");
+}
+
+function absolutePublicImageUrl(value = "", origin = "") {
+  const image = cleanText(value);
+  if (/^https:\/\//i.test(image)) return image;
+  if (image.startsWith("/")) return `${origin}${image}`;
+  return `${origin}/LogoReal.png`;
+}
+
+function escapeHtml(value = "") {
+  return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+}
+
 function setCorsHeaders(res) {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 }
