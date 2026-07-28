@@ -1,9 +1,10 @@
-import { deleteDoc, doc, getDocs, query, serverTimestamp, setDoc, where, collection } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { deleteToken, getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 import { firebaseApp, firestoreDb } from "./firebase";
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY || "";
-const TOKEN_HASH_KEY = "ashram-admin-fcm-token-hash";
+const ADMIN_TOKEN_HASH_KEY = "ashram-admin-fcm-token-hash";
+const USER_TOKEN_HASH_KEY = "ashram-user-fcm-token-hash";
 
 export async function notificationSupportState() {
   if (!VAPID_KEY) return { status: "not-configured", label: "No configuradas" };
@@ -16,7 +17,38 @@ export async function notificationSupportState() {
 }
 
 export async function enableAdminNotifications(user) {
-  if (!user?.uid) throw new Error("Necesitas iniciar sesión como administrador.");
+  if (!user?.uid) throw new Error("Necesitas iniciar sesion como administrador.");
+  return enableNotifications(user, {
+    collectionName: "adminNotificationTokens",
+    storageKey: ADMIN_TOKEN_HASH_KEY,
+    includeEmail: true,
+  });
+}
+
+export async function disableAdminNotifications(user) {
+  return disableNotifications(user, {
+    collectionName: "adminNotificationTokens",
+    storageKey: ADMIN_TOKEN_HASH_KEY,
+  });
+}
+
+export async function enableUserNotifications(user) {
+  if (!user?.uid) throw new Error("Necesitas iniciar sesion.");
+  return enableNotifications(user, {
+    collectionName: "userNotificationTokens",
+    storageKey: USER_TOKEN_HASH_KEY,
+    includeEmail: false,
+  });
+}
+
+export async function disableUserNotifications(user) {
+  return disableNotifications(user, {
+    collectionName: "userNotificationTokens",
+    storageKey: USER_TOKEN_HASH_KEY,
+  });
+}
+
+async function enableNotifications(user, { collectionName, storageKey, includeEmail }) {
   const support = await notificationSupportState();
   if (support.status === "not-configured") throw new Error("Falta configurar VITE_FIREBASE_VAPID_KEY.");
   if (support.status === "unsupported") throw new Error("Este navegador no soporta notificaciones push.");
@@ -25,29 +57,30 @@ export async function enableAdminNotifications(user) {
   const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
   const messaging = getMessaging(firebaseApp);
   const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
-  if (!token) throw new Error("Firebase no devolvió un token de notificaciones.");
+  if (!token) throw new Error("Firebase no devolvio un token de notificaciones.");
   const tokenHash = await sha256(token);
-  localStorage.setItem(TOKEN_HASH_KEY, tokenHash);
-  await setDoc(doc(firestoreDb, "adminNotificationTokens", tokenHash), {
+  localStorage.setItem(storageKey, tokenHash);
+  const data = {
     token,
     uid: user.uid,
-    email: user.email || "",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     userAgent: navigator.userAgent || "",
     enabled: true,
-  }, { merge: true });
+  };
+  if (includeEmail) data.email = user.email || "";
+  await setDoc(doc(firestoreDb, collectionName, tokenHash), data, { merge: true });
   return { status: "enabled", label: "Activadas" };
 }
 
-export async function disableAdminNotifications(user) {
+async function disableNotifications(user, { collectionName, storageKey }) {
   const messaging = await isSupported().then((ok) => ok ? getMessaging(firebaseApp) : null).catch(() => null);
   if (messaging) await deleteToken(messaging).catch(() => false);
-  const storedHash = localStorage.getItem(TOKEN_HASH_KEY);
-  if (storedHash) await deleteDoc(doc(firestoreDb, "adminNotificationTokens", storedHash)).catch(() => {});
-  localStorage.removeItem(TOKEN_HASH_KEY);
+  const storedHash = localStorage.getItem(storageKey);
+  if (storedHash) await deleteDoc(doc(firestoreDb, collectionName, storedHash)).catch(() => {});
+  localStorage.removeItem(storageKey);
   if (user?.uid) {
-    const snap = await getDocs(query(collection(firestoreDb, "adminNotificationTokens"), where("uid", "==", user.uid)));
+    const snap = await getDocs(query(collection(firestoreDb, collectionName), where("uid", "==", user.uid)));
     await Promise.all(snap.docs.map((item) => deleteDoc(item.ref).catch(() => {})));
   }
   return notificationSupportState();

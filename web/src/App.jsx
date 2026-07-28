@@ -88,7 +88,9 @@ import {
 } from "./analyticsService";
 import {
   disableAdminNotifications,
+  disableUserNotifications,
   enableAdminNotifications,
+  enableUserNotifications,
   listenForegroundNotifications,
   notificationSupportState,
 } from "./notificationService";
@@ -4991,9 +4993,21 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
 }
 
 function AdminNotificationSettings({ onToast }) {
+  return (
+    <PushNotificationSettings
+      mode="admin"
+      title="Notificaciones push"
+      description="Recibi mensajes, pedidos y turnos aunque no tengas la app abierta."
+      onToast={onToast}
+    />
+  );
+}
+
+function PushNotificationSettings({ mode = "user", title, description, onToast }) {
   const [state, setState] = useState({ status: "checking", label: "Revisando..." });
   const [busy, setBusy] = useState(false);
   const user = auth.currentUser;
+  const isAdminMode = mode === "admin";
 
   useEffect(() => {
     notificationSupportState().then(setState);
@@ -5010,7 +5024,7 @@ function AdminNotificationSettings({ onToast }) {
   async function enable() {
     setBusy(true);
     try {
-      const next = await enableAdminNotifications(user);
+      const next = isAdminMode ? await enableAdminNotifications(user) : await enableUserNotifications(user);
       setState(next);
       onToast?.("Notificaciones activadas.");
     } catch (error) {
@@ -5024,7 +5038,7 @@ function AdminNotificationSettings({ onToast }) {
   async function disable() {
     setBusy(true);
     try {
-      const next = await disableAdminNotifications(user);
+      const next = isAdminMode ? await disableAdminNotifications(user) : await disableUserNotifications(user);
       setState(next);
       onToast?.("Notificaciones desactivadas.");
     } catch (error) {
@@ -5037,12 +5051,12 @@ function AdminNotificationSettings({ onToast }) {
   return (
     <section className="admin-push-card">
       <span>
-        <strong>Notificaciones push</strong>
-        <small>Estado: {state.label}. Se solicitan solo cuando el administrador toca activar.</small>
+        <strong>{title || "Notificaciones"}</strong>
+        <small>Estado: {state.label}. {description || "Se activan solo cuando tocas activar."}</small>
       </span>
       <div>
-        <button className="primary small" type="button" onClick={enable} disabled={busy || state.status === "enabled" || state.status === "blocked" || state.status === "not-configured"}>
-          <Bell size={15} /> Activar notificaciones
+        <button className="primary small" type="button" onClick={enable} disabled={busy || state.status === "blocked" || state.status === "not-configured"}>
+          <Bell size={15} /> {state.status === "enabled" ? "Actualizar avisos" : "Activar notificaciones"}
         </button>
         <button className="ghost compact" type="button" onClick={disable} disabled={busy || state.status !== "enabled"}>Desactivar</button>
       </div>
@@ -7858,6 +7872,14 @@ function Perfil({ user, profile, pendingSubscription, onBack, onProfileSaved, on
         <label>Fecha nacimiento<input value={form.fecha_nacimiento} onChange={(e) => setField("fecha_nacimiento", e.target.value)} /></label>
         <button className="primary" disabled={busy}>{busy ? "Guardando..." : "Guardar mi espacio"}</button>
       </form>
+      <PushNotificationSettings
+        mode={isAdminProfile(profile, user) ? "admin" : "user"}
+        title={isAdminProfile(profile, user) ? "Avisos de administrador" : "Avisos del Ashram"}
+        description={isAdminProfile(profile, user)
+          ? "Recibi mensajes, pedidos y turnos en este telefono."
+          : "Activa avisos para recibir novedades importantes del Ashram en este telefono."}
+        onToast={onToast}
+      />
     </section>
   );
 }

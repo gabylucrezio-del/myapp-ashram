@@ -355,6 +355,22 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
     }
 
+    match /userNotificationTokens/{tokenId} {
+      allow read, delete: if signedIn()
+        && resource.data.uid == request.auth.uid;
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          'token', 'uid', 'createdAt', 'updatedAt', 'userAgent', 'enabled'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && isString(request.resource.data.token)
+        && request.resource.data.token.size() <= 500
+        && isOptionalString(request.resource.data, 'userAgent', 500)
+        && isOptionalBool(request.resource.data, 'enabled')
+        && isOptionalTimestamp(request.resource.data, 'createdAt')
+        && isOptionalTimestamp(request.resource.data, 'updatedAt');
+    }
+
     match /adminNotificationEvents/{eventId} {
       allow read, write: if isAdmin();
     }
