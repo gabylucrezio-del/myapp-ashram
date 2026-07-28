@@ -586,6 +586,27 @@ exports.onLiveMessageCreated = onDocumentCreated({
   });
 });
 
+exports.onDirectChatMessageCreated = onValueCreated({
+  ref: "/chat/{threadId}/mensajes/{messageId}",
+  instance: "ashramganesha-default-rtdb",
+  serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
+}, async (event) => {
+  const message = event.data.val() || {};
+  if (message.rol === "admin" ||
+      ADMIN_EMAILS.has(String(message.remitente_email || ""))) return;
+  await sendAdminNotificationOnce({
+    eventId: `chat-${event.params.threadId}-${event.params.messageId}`,
+    type: "chat",
+    title: `Nuevo mensaje de ${limitText(
+        message.remitente_nombre || "la comunidad",
+        40,
+    )}`,
+    body: limitText(message.texto || "Mensaje recibido en el chat.", 90),
+    route: "/#chat",
+    id: event.params.threadId,
+  });
+});
+
 exports.onStoreOrderCreated = onValueCreated({
   ref: "/pedidos/{orderId}",
   instance: "ashramganesha-default-rtdb",
