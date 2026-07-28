@@ -7,7 +7,6 @@ const ADMIN_TOKEN_HASH_KEY = "ashram-admin-fcm-token-hash";
 const USER_TOKEN_HASH_KEY = "ashram-user-fcm-token-hash";
 
 export async function notificationSupportState() {
-  if (!VAPID_KEY) return { status: "not-configured", label: "No configuradas" };
   if (!("Notification" in window)) return { status: "unsupported", label: "No compatibles" };
   const supported = await isSupported().catch(() => false);
   if (!supported) return { status: "unsupported", label: "No compatibles" };
@@ -49,7 +48,6 @@ export async function disableUserNotifications(user) {
 }
 
 async function enableNotifications(user, { collectionName, storageKey, includeEmail }) {
-  if (!VAPID_KEY) throw new Error("Falta configurar VITE_FIREBASE_VAPID_KEY.");
   if (!("Notification" in window)) throw new Error("Este navegador no soporta notificaciones push.");
   if (Notification.permission === "denied") return { status: "blocked", label: "Bloqueadas" };
   const permission = Notification.permission === "granted"
@@ -60,7 +58,9 @@ async function enableNotifications(user, { collectionName, storageKey, includeEm
   if (!supported) throw new Error("Este navegador no soporta notificaciones push.");
   const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
   const messaging = getMessaging(firebaseApp);
-  const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
+  const tokenOptions = { serviceWorkerRegistration: registration };
+  if (VAPID_KEY) tokenOptions.vapidKey = VAPID_KEY;
+  const token = await getToken(messaging, tokenOptions);
   if (!token) throw new Error("Firebase no devolvio un token de notificaciones.");
   const tokenHash = await sha256(token);
   localStorage.setItem(storageKey, tokenHash);
@@ -91,7 +91,6 @@ async function disableNotifications(user, { collectionName, storageKey }) {
 }
 
 export async function listenForegroundNotifications(onNotification) {
-  if (!VAPID_KEY) return () => {};
   const supported = await isSupported().catch(() => false);
   if (!supported) return () => {};
   const messaging = getMessaging(firebaseApp);
