@@ -69,6 +69,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  where,
 } from "firebase/firestore";
 import { deleteObject, getBlob, ref as storageRef } from "firebase/storage";
 import { auth, db, firebaseConfig, firestoreDb, storage } from "./firebase";
@@ -379,6 +380,7 @@ export default function App() {
   const [subscriptionPrompt, setSubscriptionPrompt] = useState(null);
   const [shareDraft, setShareDraft] = useState(null);
   const [adminAlerts, setAdminAlerts] = useState(() => readAdminAlerts());
+  const viewTimeRef = useRef({ view: "", startedAt: Date.now() });
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
@@ -442,6 +444,23 @@ export default function App() {
       contentId: view,
       contentTitle: sectionLabel(view),
     });
+  }, [authState.user?.uid, view]);
+
+  useEffect(() => {
+    if (!authState.user || !view) return undefined;
+    const previous = viewTimeRef.current;
+    const now = Date.now();
+    if (previous.view && previous.view !== view) {
+      trackSectionDuration(previous.view, previous.startedAt, now);
+    }
+    viewTimeRef.current = { view, startedAt: now };
+
+    const flushCurrentView = () => {
+      const current = viewTimeRef.current;
+      if (current.view) trackSectionDuration(current.view, current.startedAt, Date.now());
+    };
+    window.addEventListener("pagehide", flushCurrentView);
+    return () => window.removeEventListener("pagehide", flushCurrentView);
   }, [authState.user?.uid, view]);
 
   useEffect(() => {
@@ -1400,7 +1419,8 @@ function Shell({ children, user, profile, view, menuConfig, appSettings, setView
     { id: "home", label: "Inicio", icon: BookOpen, iconSrc: APP_LOGO_SRC, activeViews: ["home"] },
     { id: "blog", label: "Blog", icon: Newspaper, activeViews: ["blog"] },
     { id: "sesiones", label: "Agenda", icon: CalendarDays, activeViews: ["sesiones", "en-vivo"] },
-    { id: "perfil", label: "Mi espacio", icon: User, activeViews: ["perfil", "chat", "ofrendas"] },
+    { id: "chat", label: "Chat", icon: MessageCircle, activeViews: ["chat"] },
+    { id: "perfil", label: "Mi espacio", icon: User, activeViews: ["perfil", "ofrendas"] },
   ].filter((item) => item && (!isMainMenuSection(item.id) || isMainMenuEnabled(menuConfig, item.id)));
 
   return (
@@ -4705,6 +4725,7 @@ function ChatThread({ user, profile, threadId, isAdmin, onBack }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sendError, setSendError] = useState("");
   const lastIncomingMessageRef = useRef("");
 
   useEffect(() => {
@@ -4733,6 +4754,7 @@ function ChatThread({ user, profile, threadId, isAdmin, onBack }) {
     const message = cleanText(text);
     if (!message) return;
     setBusy(true);
+    setSendError("");
     const fecha = new Date().toISOString();
     const payload = {
       texto: message,
@@ -4755,10 +4777,16 @@ function ChatThread({ user, profile, threadId, isAdmin, onBack }) {
       threadData.usuario_nombre = profile?.nombre || "";
       threadData.usuario_foto = profile?.foto_url || "";
     }
-    await push(ref(db, `chat/${threadId}/mensajes`), payload);
-    await update(ref(db, `chat/${threadId}`), threadData);
-    setText("");
-    setBusy(false);
+    try {
+      await push(ref(db, `chat/${threadId}/mensajes`), payload);
+      await update(ref(db, `chat/${threadId}`), threadData);
+      setText("");
+    } catch (error) {
+      console.warn("No se pudo enviar el mensaje", error);
+      setSendError("No se pudo enviar el mensaje. Revisa la conexion e intenta nuevamente.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -4783,9 +4811,10 @@ function ChatThread({ user, profile, threadId, isAdmin, onBack }) {
             );
           })}
         </div>
+        {sendError ? <p className="player-error chat-send-error">{sendError}</p> : null}
         <form className="chat-input" onSubmit={sendMessage}>
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe un mensaje..." />
-          <button className="primary" disabled={busy}>
+          <button className="primary" disabled={busy || !cleanText(text)}>
             <Send size={17} />
           </button>
         </form>
@@ -6130,6 +6159,8 @@ function AnalyticsDashboard() {
   const [weeklyReports, setWeeklyReports] = useState([]);
   const [selectedReportId, setSelectedReportId] = useState("");
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [selectedDay, setSelectedDay] = useState(todayDateKey());
+  const [dailyEvents, setDailyEvents] = useState([]);
 
   useEffect(() => {
     const unsubscribers = [
@@ -6164,6 +6195,13 @@ function AnalyticsDashboard() {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
 
+  useEffect(() => {
+    if (!selectedDay) return undefined;
+    return onSnapshot(query(collection(firestoreDb, "analyticsEvents"), where("dateKey", "==", selectedDay), limit(500)), (snap) => {
+      setDailyEvents(snap.docs.map((item) => ({ id: item.id, ...item.data() })));
+    }, analyticsReadError(setDiagnosticsError));
+  }, [selectedDay]);
+
   const posts = contentStats.filter((item) => item.contentType === "blog" || item.eventType === "open_post").slice(0, 5);
   const satsangs = contentStats
     .filter((item) => item.contentType === "satsang" || item.category === "satsang" || item.category === "Satsang")
@@ -6172,6 +6210,7 @@ function AnalyticsDashboard() {
   const contentVisits = contentStats.filter((item) => item.eventType !== "open_section").slice(0, 8);
   const ganeshaTopics = topicStats.filter((item) => !["Ganesha", "Guia", "Ashram"].includes(analyticsItemTitle(item))).slice(0, 8);
   const selectedReport = weeklyReports.find((report) => report.id === selectedReportId) || weeklyReports[0] || null;
+  const dailySummary = buildDailyAnalyticsSummary(dailyEvents);
 
   async function generateTestReport() {
     setGeneratingReport(true);
@@ -6195,17 +6234,34 @@ function AnalyticsDashboard() {
   return (
     <div className="analytics-dashboard">
       <header className="admin-list-head">
-        <strong>Resumen simple de actividad</strong>
-        <small>Lo mas consultado y visitado por la comunidad, sin datos personales.</small>
+        <strong>Actividad diaria</strong>
+        <small>Lectura simple de publicaciones, tienda, plataforma, registros y Ganesha Guia.</small>
       </header>
-      <div className="analytics-kpi-grid">
-        <AnalyticsKpi icon={MessageCircle} label="Preguntas a Ganesha" value={overview.ask_ganesha || 0} />
-        <AnalyticsKpi icon={Newspaper} label="Entradas a posts" value={sumCounts(posts)} />
-        <AnalyticsKpi icon={Heart} label="Entradas a satsang" value={sumCounts(satsangs)} />
-        <AnalyticsKpi icon={ActivityIcon} label="Actividad total" value={overview.totalEvents || 0} />
+      <DailyAnalyticsToolbar selectedDay={selectedDay} setSelectedDay={setSelectedDay} />
+      <div className="analytics-kpi-grid daily-kpi-grid">
+        <AnalyticsKpi icon={Eye} label="Publicaciones vistas" value={dailySummary.publicationViews} />
+        <AnalyticsKpi icon={ShoppingBag} label="Movimiento tienda" value={dailySummary.storeActivity} />
+        <AnalyticsKpi icon={Library} label="Uso plataforma" value={dailySummary.platformActivity} />
+        <AnalyticsKpi icon={User} label="Nuevos registros" value={dailySummary.signups} />
+        <AnalyticsKpi icon={MessageCircle} label="Ganesha Guia" value={dailySummary.ganeshaQuestions} />
+        <AnalyticsKpi icon={ActivityIcon} label="Eventos del dia" value={dailySummary.totalEvents} />
       </div>
       <section className="analytics-privacy-note">
-        El Ashram utiliza estadisticas generales y anonimas para comprender que contenidos son mas utiles y mejorar la experiencia de la comunidad.
+        Estos datos muestran actividad general por dia. No se muestran nombres, correos ni informacion privada de visitantes.
+      </section>
+      <div className="analytics-grid">
+        <AnalyticsRanking title="Publicaciones vistas ese dia" icon={Newspaper} items={dailySummary.publications} />
+        <AnalyticsRanking title="Tienda ese dia" icon={ShoppingBag} items={dailySummary.storeItems} />
+        <AnalyticsRanking title="Plataforma del Ashram" icon={Library} items={dailySummary.platformItems} />
+        <AnalyticsRanking title="Donde se quedaron mas tiempo" icon={BarChart3} items={dailySummary.durationItems} />
+      </div>
+      <DailyAnalyticsBreakdown summary={dailySummary} />
+      <section className="analytics-card analytics-wide">
+        <div className="admin-list-head">
+          <strong>Movimiento de los ultimos 7 dias</strong>
+          <small>Entradas y consultas generales por dia.</small>
+        </div>
+        <AnalyticsTrend items={dailyStats} />
       </section>
       <WeeklyStoreReportCard
         reports={weeklyReports}
@@ -6218,23 +6274,45 @@ function AnalyticsDashboard() {
       <div className="analytics-grid">
         <AnalyticsRanking title="Lo mas consultado en Ganesha Guia" icon={MessageCircle} items={questionStats.slice(0, 8)} />
         <AnalyticsRanking title="Temas que mas aparecen" icon={Leaf} items={ganeshaTopics} />
-        <AnalyticsRanking title="Partes de la app mas visitadas" icon={BarChart3} items={sectionStats} />
-        <AnalyticsRanking title="Contenidos mas abiertos" icon={BookOpen} items={contentVisits} />
-      </div>
-      <section className="analytics-card analytics-wide">
-        <div className="admin-list-head">
-          <strong>Movimiento de los ultimos 7 dias</strong>
-          <small>Entradas y consultas generales por dia.</small>
-        </div>
-        <AnalyticsTrend items={dailyStats} />
-      </section>
-      <div className="analytics-grid">
         <AnalyticsRanking title="Posts mas leidos" icon={Newspaper} items={posts} />
         <AnalyticsRanking title="Satsang mas vistos" icon={Heart} items={satsangs} />
         <AnalyticsRanking title="Busquedas frecuentes" icon={SearchIcon} items={searchStats.slice(0, 8)} />
         <AnalyticsRanking title="Categorias con mas interes" icon={Library} items={categoryStats.slice(0, 8)} />
       </div>
     </div>
+  );
+}
+
+function DailyAnalyticsToolbar({ selectedDay, setSelectedDay }) {
+  return (
+    <section className="daily-analytics-toolbar">
+      <button className={selectedDay === todayDateKey() ? "active" : ""} type="button" onClick={() => setSelectedDay(todayDateKey())}>Hoy</button>
+      <button className={selectedDay === offsetDateKey(-1) ? "active" : ""} type="button" onClick={() => setSelectedDay(offsetDateKey(-1))}>Ayer</button>
+      <button className={selectedDay === offsetDateKey(-7) ? "active" : ""} type="button" onClick={() => setSelectedDay(offsetDateKey(-7))}>Hace 7 dias</button>
+      <label>
+        Elegir fecha
+        <input type="date" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} />
+      </label>
+    </section>
+  );
+}
+
+function DailyAnalyticsBreakdown({ summary }) {
+  return (
+    <section className="analytics-card analytics-wide daily-breakdown">
+      <h2><BarChart3 size={18} /> Resumen del dia</h2>
+      <div className="weekly-report-metrics">
+        <span>Portada <strong>{summary.counts.landing_view || 0}</strong></span>
+        <span>Tienda abierta <strong>{summary.counts.store_view || summary.counts.tienda_open || 0}</strong></span>
+        <span>Productos vistos <strong>{summary.counts.product_view || 0}</strong></span>
+        <span>Carrito <strong>{summary.counts.add_to_cart || 0}</strong></span>
+        <span>WhatsApp <strong>{summary.counts.whatsapp_order_click || summary.counts.whatsapp_order_confirmed || 0}</strong></span>
+        <span>App Ashram <strong>{summary.counts.app_open || 0}</strong></span>
+        <span>Inicios sesion <strong>{summary.counts.login_success || 0}</strong></span>
+        <span>Registros <strong>{summary.counts.signup_success || 0}</strong></span>
+      </div>
+      {!summary.totalEvents ? <p className="empty-state">Todavia no hay datos para este dia. Los datos internos aparecen cuando usuarios registrados interactuan con la app.</p> : null}
+    </section>
   );
 }
 
@@ -6360,11 +6438,92 @@ function AnalyticsDiagnostics({ diagnostics, error }) {
 }
 
 function analyticsItemTitle(item = {}) {
-  return item.title || item.question || item.searchQuery || item.topic || item.keyword || item.category || "Sin titulo";
+  return item.title || item.productName || item.contentTitle || item.question || item.searchQuery || item.topic || item.keyword || item.category || "Sin titulo";
 }
 
 function sumCounts(items = []) {
   return items.reduce((total, item) => total + Number(item.count || 0), 0);
+}
+
+function buildDailyAnalyticsSummary(events = []) {
+  const counts = {};
+  events.forEach((event) => {
+    counts[event.eventType] = (counts[event.eventType] || 0) + 1;
+  });
+  const publicationEvents = events.filter((event) => ["open_post", "open_article", "open_content"].includes(event.eventType));
+  const storeEvents = events.filter((event) => ["store_view", "tienda_open", "product_view", "add_to_cart", "store_product_shared", "whatsapp_order_click", "whatsapp_order_confirmed", "begin_checkout"].includes(event.eventType));
+  const platformEvents = events.filter((event) => ["app_open", "open_section", "open_course", "open_meditation", "open_book", "open_video", "search_content", "click_related_resource"].includes(event.eventType));
+  const durationEvents = events.filter((event) => event.eventType === "section_time" && Number(event.durationMinutes || 0) > 0);
+  return {
+    totalEvents: events.length,
+    counts,
+    publicationViews: publicationEvents.length,
+    storeActivity: storeEvents.length,
+    platformActivity: platformEvents.length,
+    signups: counts.signup_success || 0,
+    ganeshaQuestions: counts.ask_ganesha || 0,
+    publications: rankDailyEvents(publicationEvents, "publication").slice(0, 8),
+    storeItems: rankDailyEvents(storeEvents, "store").slice(0, 8),
+    platformItems: rankDailyEvents(platformEvents, "platform").slice(0, 8),
+    durationItems: rankDurationEvents(durationEvents).slice(0, 8),
+  };
+}
+
+function rankDailyEvents(events = [], fallbackType = "Ashram") {
+  const ranked = new Map();
+  events.forEach((event) => {
+    const title = event.productName || event.contentTitle || event.searchQuery || event.question || sectionLabel(event.contentId) || event.eventType;
+    const key = `${event.eventType}-${event.productId || event.contentId || title}`;
+    const current = ranked.get(key) || {
+      id: key,
+      title,
+      category: event.category || event.contentCategory || event.contentType || fallbackType,
+      eventType: event.eventType,
+      count: 0,
+    };
+    current.count += 1;
+    ranked.set(key, current);
+  });
+  return [...ranked.values()].sort((a, b) => b.count - a.count);
+}
+
+function rankDurationEvents(events = []) {
+  const ranked = new Map();
+  events.forEach((event) => {
+    const title = event.contentTitle || sectionLabel(event.contentId) || "Seccion";
+    const key = event.contentId || title;
+    const minutes = Number(event.durationMinutes || 0);
+    const current = ranked.get(key) || {
+      id: key,
+      title,
+      category: "minutos aproximados",
+      count: 0,
+    };
+    current.count = Math.round((current.count + minutes) * 10) / 10;
+    ranked.set(key, current);
+  });
+  return [...ranked.values()].sort((a, b) => b.count - a.count);
+}
+
+function todayDateKey() {
+  return offsetDateKey(0);
+}
+
+function offsetDateKey(offsetDays = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
+function trackSectionDuration(viewId, startedAt, endedAt = Date.now()) {
+  const elapsedMs = endedAt - startedAt;
+  if (!viewId || elapsedMs < 15000) return;
+  trackEvent("section_time", {
+    contentType: "section",
+    contentId: viewId,
+    contentTitle: sectionLabel(viewId),
+    durationMinutes: Math.round((elapsedMs / 60000) * 10) / 10,
+  });
 }
 
 function buildCommunitySuggestions(topics = [], categories = []) {
@@ -7325,11 +7484,10 @@ function EnVivo({ user, profile, onBack, onToast }) {
     try {
       await addDoc(collection(firestoreDb, "enVivoMensajes"), {
         uid: user.uid,
-        nombre: profileDisplayName(profile) || user.email || "Usuario",
-        email: user.email || "",
+        nombre: profileDisplayName(profile) || "Usuario",
         texto: cleanMessage,
+        rol: isAdmin ? "admin" : "usuario",
         createdAt: serverTimestamp(),
-        createdAtLocal: new Date().toISOString(),
       });
       setText("");
     } catch {

@@ -68,7 +68,9 @@ service cloud.firestore {
       && data.eventType is string
       && data.eventType.size() <= 80
       && [
-        'login', 'logout', 'open_section', 'open_post', 'open_article',
+        'login', 'logout', 'login_success', 'signup_success', 'continue_as_guest',
+        'landing_view', 'app_open', 'tienda_open', 'open_section', 'section_time',
+        'open_post', 'open_article',
         'open_course', 'open_meditation', 'open_book', 'ask_ganesha',
         'search_content', 'finish_meditation', 'open_video',
         'click_related_resource',
@@ -89,7 +91,7 @@ service cloud.firestore {
       && isOptionalList(data, 'detectedTopics', 12)
       && isOptionalList(data, 'tags', 20)
       && isOptionalList(data, 'keywords', 20)
-      && isOptionalInt(data, 'durationMinutes')
+      && isOptionalNumberOrNull(data, 'durationMinutes')
       && isOptionalString(data, 'productId', 180)
       && isOptionalString(data, 'productName', 220)
       && isOptionalString(data, 'shareMethod', 80)

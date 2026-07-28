@@ -571,7 +571,8 @@ exports.onLiveMessageCreated = onDocumentCreated({
   serviceAccount: "ashramganesha@appspot.gserviceaccount.com",
 }, async (event) => {
   const message = event.data?.data() || {};
-  if (ADMIN_EMAILS.has(String(message.email || ""))) return;
+  if (message.rol === "admin" ||
+      ADMIN_EMAILS.has(String(message.email || ""))) return;
   await sendAdminNotificationOnce({
     eventId: `message-${event.params.messageId}`,
     type: "message",

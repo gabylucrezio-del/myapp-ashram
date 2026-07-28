@@ -245,6 +245,13 @@ async function updateSessionMinutes(userId, durationMinutes) {
 function isCommunityInterestEvent(eventType = "") {
   return [
     "open_section",
+    "section_time",
+    "landing_view",
+    "app_open",
+    "tienda_open",
+    "login_success",
+    "signup_success",
+    "continue_as_guest",
     "open_post",
     "open_article",
     "open_course",

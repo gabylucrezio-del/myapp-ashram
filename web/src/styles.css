@@ -776,7 +776,7 @@ a.primary {
   position: fixed;
   left: 50%;
   bottom: 10px;
-  z-index: 20;
+  z-index: 10050;
   width: max-content;
   max-width: calc(100vw - 20px);
   transform: translateX(-50%);
@@ -795,7 +795,7 @@ a.primary {
 
 .bottom-nav.admin-bottom-nav {
   width: max-content;
-  grid-auto-columns: minmax(66px, 74px);
+  grid-auto-columns: minmax(68px, 78px);
 }
 
 .bottom-nav button {
@@ -5001,6 +5001,61 @@ a.primary {
   gap: 10px;
 }
 
+.daily-kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+}
+
+.daily-analytics-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(216, 199, 160, 0.74);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.9);
+  box-shadow: 0 10px 24px rgba(69, 58, 34, 0.06);
+}
+
+.daily-analytics-toolbar button {
+  min-height: 40px;
+  border: 1px solid rgba(127, 155, 97, 0.35);
+  border-radius: 999px;
+  padding: 0 14px;
+  background: #fffdf8;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.daily-analytics-toolbar button.active {
+  background: var(--olive);
+  color: #fffdf8;
+  border-color: var(--olive);
+}
+
+.daily-analytics-toolbar label {
+  display: grid;
+  gap: 4px;
+  margin-left: auto;
+  color: #6c6840;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.daily-analytics-toolbar input {
+  min-height: 40px;
+  border: 1px solid rgba(216, 199, 160, 0.74);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fffdf8;
+  color: var(--text);
+  font: inherit;
+}
+
+.daily-breakdown h2 {
+  margin-bottom: 10px;
+}
+
 .analytics-kpi,
 .analytics-card,
 .analytics-online-panel,
@@ -6465,6 +6520,11 @@ a.primary {
 .chat-input .primary {
   padding: 0;
   border-radius: 12px;
+}
+
+.chat-send-error {
+  padding: 0 2px;
+  font-size: 12px;
 }
 
 .public-live-shell {
