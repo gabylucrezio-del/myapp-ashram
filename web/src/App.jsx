@@ -5056,7 +5056,7 @@ function PushNotificationSettings({ mode = "user", title, description, onToast }
       </span>
       <div>
         <button className="primary small" type="button" onClick={enable} disabled={busy || state.status === "blocked" || state.status === "not-configured"}>
-          <Bell size={15} /> {state.status === "enabled" ? "Actualizar avisos" : "Activar notificaciones"}
+          <Bell size={15} /> {state.status === "enabled" ? "Actualizar avisos" : "Permitir avisos"}
         </button>
         <button className="ghost compact" type="button" onClick={disable} disabled={busy || state.status !== "enabled"}>Desactivar</button>
       </div>
