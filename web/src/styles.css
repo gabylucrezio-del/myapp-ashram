@@ -13152,6 +13152,10 @@ a.primary {
   background: #fff7e8;
 }
 
+.deity-card .deity-image-fallback {
+  aspect-ratio: 4 / 5;
+}
+
 .deity-card div,
 .deity-section,
 .deity-comment-admin,
@@ -13195,6 +13199,10 @@ a.primary {
   max-height: 360px;
   object-fit: cover;
   border-radius: 8px;
+}
+
+.deity-hero .deity-image-fallback {
+  min-height: 260px;
 }
 
 .deity-kicker {
@@ -13262,6 +13270,11 @@ a.primary {
   border-radius: 8px;
 }
 
+.offering-card .deity-image-fallback,
+.related-products .deity-image-fallback {
+  aspect-ratio: 1;
+}
+
 .ritual-steps {
   display: grid;
   gap: 8px;
@@ -13299,9 +13312,85 @@ a.primary {
   background: #fff8e7;
 }
 
-.deity-form-preview {
-  width: min(260px, 100%);
+.deity-preview-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
   border-radius: 8px;
+  background: #fff8e7;
+}
+
+.deity-store-image-picker {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255, 248, 231, 0.72);
+}
+
+.deity-inline-search {
+  display: grid;
+  gap: 6px;
+}
+
+.deity-store-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.deity-store-image-grid button {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid rgba(216, 199, 160, 0.78);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.95);
+  color: #4c3c25;
+  text-align: left;
+}
+
+.deity-store-image-grid img,
+.deity-store-image-grid .deity-image-fallback {
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
+  object-fit: cover;
+  border-radius: 7px;
+}
+
+.deity-store-image-grid span {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.deity-store-image-grid small {
+  color: #8a6f22;
+  font-size: 11px;
+}
+
+.deity-form-preview {
+  width: min(320px, 100%);
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(216, 199, 160, 0.78);
+  background: #fffdf8;
+}
+
+.deity-image-fallback {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 120px;
+  border-radius: 8px;
+  border: 1px dashed rgba(145, 107, 94, 0.34);
+  background: linear-gradient(135deg, rgba(255, 248, 231, 0.94), rgba(238, 215, 166, 0.45));
+  color: #8a6f22;
+  text-align: center;
+  font-size: 12px;
 }
 
 .deity-array-row {
@@ -13331,6 +13420,12 @@ a.primary {
   width: 54px;
   height: 54px;
   object-fit: cover;
+}
+
+.deity-admin-row .deity-image-fallback {
+  width: 54px;
+  height: 54px;
+  min-height: 54px;
 }
 
 .deity-comment-admin {

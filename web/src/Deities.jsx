@@ -143,7 +143,7 @@ function DeityList({ onOpenDeity, onBack }) {
       <div className="deity-grid">
         {visibleItems.map((deity) => (
           <article className="deity-card" key={deity.id}>
-            <img src={deity.mainImageUrl || DEFAULT_DEITY_IMAGE} alt={deity.name} />
+            <DeityImage src={deity.mainImageUrl || DEFAULT_DEITY_IMAGE} alt={deity.name} />
             <div>
               <h2>{deity.name}</h2>
               <p>{summary(deity.shortDescription, 120)}</p>
@@ -210,7 +210,7 @@ function DeityDetail({ user, profile, slug, onBack, onToast }) {
     <section className="content-page deities-page deity-detail-page">
       <button className="ghost deity-back" type="button" onClick={onBack}><ArrowLeft size={18} /> Deidades y Rituales</button>
       <header className="deity-hero">
-        <img src={deity.mainImageUrl || DEFAULT_DEITY_IMAGE} alt={deity.name} />
+        <DeityImage src={deity.mainImageUrl || DEFAULT_DEITY_IMAGE} alt={deity.name} />
         <div>
           <span className="deity-kicker">Ashram Ganesha</span>
           <h1>{deity.name}</h1>
@@ -378,7 +378,7 @@ export function DeitiesAdmin({ profile, onToast }) {
       <div className="list deity-admin-list">
         {visibleItems.map((item) => (
           <article className="admin-row deity-admin-row" key={item.id}>
-            <img src={item.mainImageUrl || DEFAULT_DEITY_IMAGE} alt="" />
+            <DeityImage src={item.mainImageUrl || DEFAULT_DEITY_IMAGE} alt="" />
             <span>
               <strong>{item.name}</strong>
               <small>{item.status} - /deidades/{item.slug}</small>
@@ -399,6 +399,8 @@ export function DeitiesAdmin({ profile, onToast }) {
 
 function DeityAdminForm({ item, products, profile, onCancel, onSaved, onToast }) {
   const [form, setForm] = useState(() => normalizeDeity(item));
+  const [previewUrl, setPreviewUrl] = useState(() => cleanText(item.mainImageUrl || item.imageUrl));
+  const [productImageSearch, setProductImageSearch] = useState("");
   const [busy, setBusy] = useState(false);
 
   function setField(field, value) {
@@ -457,10 +459,13 @@ function DeityAdminForm({ item, products, profile, onCancel, onSaved, onToast })
   async function uploadImage(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+    const localPreview = URL.createObjectURL(file);
+    setPreviewUrl(localPreview);
     setBusy(true);
     try {
       const uploaded = await uploadOptimizedImage(file, "deities");
       setForm((current) => ({ ...current, mainImageUrl: uploaded.url, mainImagePath: uploaded.path }));
+      setPreviewUrl(uploaded.url);
       onToast?.("Imagen subida.");
     } catch (error) {
       console.error(error);
@@ -469,6 +474,16 @@ function DeityAdminForm({ item, products, profile, onCancel, onSaved, onToast })
       setBusy(false);
     }
   }
+
+  function chooseExistingImage(url) {
+    const cleanUrl = cleanText(url);
+    if (!cleanUrl) return;
+    setForm((current) => ({ ...current, mainImageUrl: cleanUrl, mainImagePath: "" }));
+    setPreviewUrl(cleanUrl);
+    onToast?.("Imagen de tienda seleccionada.");
+  }
+
+  const storeImageOptions = productStoreImageOptions(products, productImageSearch);
 
   async function save(event) {
     event.preventDefault();
@@ -514,7 +529,40 @@ function DeityAdminForm({ item, products, profile, onCancel, onSaved, onToast })
             <input type="file" accept="image/*" onChange={uploadImage} />
           </span>
         </label>
-        {form.mainImageUrl ? <img className="deity-form-preview" src={form.mainImageUrl} alt="" /> : null}
+        <label>Link de imagen
+          <input
+            value={form.mainImageUrl}
+            onChange={(event) => {
+              setField("mainImageUrl", event.target.value);
+              setPreviewUrl(event.target.value);
+            }}
+            placeholder="https://..."
+          />
+        </label>
+        <div className="deity-store-image-picker">
+          <div className="deity-array-head">
+            <strong>Usar imagen ya cargada en tienda</strong>
+            <small>No duplica espacio en Firebase.</small>
+          </div>
+          <label className="deity-inline-search">Buscar producto
+            <input value={productImageSearch} onChange={(event) => setProductImageSearch(event.target.value)} placeholder="Nombre o categoria" />
+          </label>
+          <div className="deity-store-image-grid">
+            {storeImageOptions.map((option) => (
+              <button type="button" key={`${option.productId}-${option.url}`} onClick={() => chooseExistingImage(option.url)}>
+                <DeityImage src={option.url} alt={option.productName} />
+                <span>{option.productName}</span>
+                <small>{option.label}</small>
+              </button>
+            ))}
+          </div>
+          {!storeImageOptions.length ? <small>No encontre imagenes de productos para mostrar.</small> : null}
+        </div>
+        <div className="deity-preview-panel">
+          <strong>Vista previa de imagen principal</strong>
+          <DeityImage className="deity-form-preview" src={previewUrl || form.mainImageUrl || DEFAULT_DEITY_IMAGE} alt={form.name || "Vista previa"} />
+          <small>{busy ? "Subiendo imagen..." : previewUrl || form.mainImageUrl ? "Esta es la imagen que se vera en la publicacion." : "Subi una imagen o pega un link para verla aca."}</small>
+        </div>
         <label>Sobre la deidad<textarea rows={5} value={form.about} onChange={(event) => setField("about", event.target.value)} /></label>
         <label>Historia<textarea rows={5} value={form.history} onChange={(event) => setField("history", event.target.value)} /></label>
         <label>Ensenanza espiritual<textarea rows={4} value={form.spiritualTeaching} onChange={(event) => setField("spiritualTeaching", event.target.value)} /></label>
@@ -706,7 +754,7 @@ function OfferingsView({ offerings }) {
       <div className="offering-grid">
         {offerings.sort((a, b) => Number(a.order || 0) - Number(b.order || 0)).map((offering, index) => (
           <article className="offering-card" key={offering.id || index}>
-            {offering.imageUrl ? <img src={offering.imageUrl} alt="" /> : <Sparkles size={22} />}
+            {offering.imageUrl ? <DeityImage src={offering.imageUrl} alt={offering.name} /> : <Sparkles size={22} />}
             <strong>{offering.name}</strong>
             <small>{offering.category}</small>
             <p>{offering.description}</p>
@@ -724,7 +772,7 @@ function RelatedProducts({ products }) {
       <div className="related-products">
         {products.map((product) => (
           <a href={`/?producto=${encodeURIComponent(product.id)}#tienda`} key={product.id}>
-            <img src={product.imagen || product.portada_url || DEFAULT_DEITY_IMAGE} alt="" />
+            <DeityImage src={product.imagen || product.portada_url || DEFAULT_DEITY_IMAGE} alt={product.nombre || product.titulo || "Producto"} />
             <span>{product.nombre || product.titulo || "Producto"}</span>
           </a>
         ))}
@@ -760,6 +808,20 @@ function PageHead({ icon: Icon, title, subtitle, onBack }) {
       </span>
     </div>
   );
+}
+
+function DeityImage({ src, alt, className = "" }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (!src || failed) {
+    return (
+      <div className={`deity-image-fallback ${className}`} role="img" aria-label={alt || "Sin imagen"}>
+        <Sparkles size={24} />
+        <span>Sin imagen</span>
+      </div>
+    );
+  }
+  return <img className={className} src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function QrTools({ deity, onToast }) {
@@ -876,6 +938,58 @@ async function seedGaneshaIfNeeded(items, profile) {
 
 function sortDeities(a, b) {
   return Number(a.displayOrder || 0) - Number(b.displayOrder || 0) || a.name.localeCompare(b.name, "es");
+}
+
+function productStoreImageOptions(products = [], search = "") {
+  const term = cleanText(search).toLowerCase();
+  return products
+    .filter((product) => {
+      if (!term) return true;
+      return `${product.nombre || ""} ${product.titulo || ""} ${product.categoria || ""}`.toLowerCase().includes(term);
+    })
+    .flatMap((product) => {
+      const images = productImages(product).slice(0, 2);
+      const productName = cleanText(product.nombre || product.titulo) || "Producto";
+      return images.map((url, index) => ({
+        productId: product.id,
+        productName,
+        url,
+        label: index === 0 ? "Imagen de catalogo" : "Imagen de detalle",
+      }));
+    })
+    .filter((item, index, list) => item.url && list.findIndex((other) => other.url === item.url) === index)
+    .slice(0, 24);
+}
+
+function splitStoreImages(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(splitStoreImages);
+  if (typeof value === "object") return Object.values(value).flatMap(splitStoreImages);
+  return String(value)
+    .split(/[\n,|;]/)
+    .map(cleanText)
+    .filter(Boolean);
+}
+
+function productImages(product = {}) {
+  const images = [
+    product.imagen,
+    product.imagen_url,
+    product.linkImagen,
+    product.linkFoto,
+    product.foto,
+    product.portada,
+    product.portada_url,
+    product.thumbnail,
+    product.imagen_detalle,
+    product.detalle_imagen,
+    product.imagen_detalle_url,
+    ...splitStoreImages(product.imagenes),
+    ...splitStoreImages(product.galeria),
+  ]
+    .map(cleanText)
+    .filter(Boolean);
+  return [...new Set(images)];
 }
 
 function sanitizePlain(value, max = 5000) {
