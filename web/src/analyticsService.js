@@ -266,6 +266,7 @@ function isCommunityInterestEvent(eventType = "") {
     "store_view",
     "product_view",
     "store_product_shared",
+    "deity_shared",
     "whatsapp_order_click",
     "whatsapp_order_confirmed",
     "begin_checkout",

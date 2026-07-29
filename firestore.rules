@@ -73,7 +73,7 @@ service cloud.firestore {
         'open_post', 'open_article',
         'open_course', 'open_meditation', 'open_book', 'ask_ganesha',
         'search_content', 'finish_meditation', 'open_video',
-        'click_related_resource',
+        'click_related_resource', 'deity_shared',
         'open_biblioteca', 'open_conocimiento', 'open_ejercicios',
         'open_satsang', 'open_content', 'store_view', 'product_view', 'store_product_shared',
         'whatsapp_order_click', 'whatsapp_order_confirmed', 'begin_checkout',
@@ -306,6 +306,34 @@ service cloud.firestore {
     match /bibliotecaRecursos/{resourceId} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
+    }
+
+    match /deities/{deityId} {
+      allow read: if isAdmin() || resource.data.status == 'publicada';
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /deityComments/{commentId} {
+      allow read: if isAdmin() || resource.data.status == 'aprobado';
+      allow create: if request.resource.data.keys().hasOnly([
+          'deityId', 'deitySlug', 'displayName', 'userId', 'content',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.status == 'pendiente'
+        && request.resource.data.deityId is string
+        && request.resource.data.deityId.size() <= 100
+        && request.resource.data.deitySlug is string
+        && request.resource.data.deitySlug.size() <= 100
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 2
+        && request.resource.data.displayName.size() <= 80
+        && request.resource.data.content is string
+        && request.resource.data.content.size() >= 8
+        && request.resource.data.content.size() <= 900
+        && isOptionalString(request.resource.data, 'userId', 160)
+        && isOptionalTimestamp(request.resource.data, 'createdAt')
+        && isOptionalTimestamp(request.resource.data, 'updatedAt');
+      allow update, delete: if isAdmin();
     }
 
     match /enVivoMensajes/{messageId} {

@@ -13099,3 +13099,298 @@ a.primary {
   color: var(--sacred-violet);
   font-size: 18px;
 }
+
+.deities-page {
+  display: grid;
+  gap: 16px;
+}
+
+.deity-search,
+.deity-admin-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(145, 107, 94, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.88);
+}
+
+.deity-search input,
+.deity-admin-toolbar input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+
+.deity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deity-card,
+.deity-section,
+.deity-comment-admin,
+.qr-panel {
+  border: 1px solid rgba(216, 199, 160, 0.78);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.92);
+  box-shadow: 0 10px 24px rgba(69, 58, 34, 0.08);
+}
+
+.deity-card {
+  overflow: hidden;
+}
+
+.deity-card img {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  background: #fff7e8;
+}
+
+.deity-card div,
+.deity-section,
+.deity-comment-admin,
+.qr-panel {
+  padding: 12px;
+}
+
+.deity-card h2,
+.deity-section h2,
+.deity-hero h1 {
+  margin: 0 0 6px;
+  color: var(--sacred-violet);
+}
+
+.deity-card p,
+.deity-section p,
+.deity-comment p {
+  color: #5f513b;
+  line-height: 1.45;
+}
+
+.deity-card .primary {
+  width: 100%;
+  justify-content: center;
+  min-height: 40px;
+  margin-top: 8px;
+}
+
+.deity-hero {
+  display: grid;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(255, 248, 231, 0.94), rgba(238, 215, 166, 0.7));
+  box-shadow: 0 12px 28px rgba(86, 54, 32, 0.12);
+}
+
+.deity-hero img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.deity-kicker {
+  color: #8a6f22;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.deity-hero blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 3px solid #d4a72c;
+  color: #6f4b2f;
+}
+
+.deity-actions,
+.deity-admin-toolbar,
+.deity-form-head,
+.deity-array-head,
+.deity-comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.deity-video {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #2c2118;
+}
+
+.deity-video iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.offering-grid,
+.related-products {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.offering-card,
+.related-products a,
+.deity-comment {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255, 248, 231, 0.9);
+  color: inherit;
+  text-decoration: none;
+}
+
+.offering-card img,
+.related-products img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.ritual-steps {
+  display: grid;
+  gap: 8px;
+  padding-left: 22px;
+}
+
+.deity-comment-form,
+.deity-form,
+.deity-form-section,
+.deity-array-row,
+.deity-product-picker,
+.deity-admin {
+  display: grid;
+  gap: 12px;
+}
+
+.deity-form-section {
+  padding: 12px;
+  border: 1px solid rgba(216, 199, 160, 0.78);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.92);
+}
+
+.deity-form-section h3 {
+  margin: 0;
+  color: var(--sacred-violet);
+}
+
+.deity-upload {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff8e7;
+}
+
+.deity-form-preview {
+  width: min(260px, 100%);
+  border-radius: 8px;
+}
+
+.deity-array-row {
+  grid-template-columns: 1fr;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff8e7;
+}
+
+.deity-product-picker {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff8e7;
+}
+
+.deity-admin-toolbar select {
+  min-height: 42px;
+}
+
+.deity-admin-row {
+  grid-template-columns: 54px 1fr auto auto auto auto auto;
+}
+
+.deity-admin-row img {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+}
+
+.deity-comment-admin {
+  grid-template-columns: 1fr;
+}
+
+.qr-panel img {
+  width: 148px;
+  height: 148px;
+  background: white;
+  border-radius: 8px;
+}
+
+.deity-skeleton {
+  padding: 18px;
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.78);
+  color: #6b6040;
+}
+
+@media (min-width: 700px) {
+  .deity-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .deity-hero {
+    grid-template-columns: minmax(220px, 0.8fr) 1fr;
+  }
+
+  .offering-grid,
+  .related-products {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .deity-array-row {
+    grid-template-columns: minmax(120px, 0.8fr) 1fr auto;
+  }
+
+  .deity-comment-admin {
+    grid-template-columns: 1fr auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .deity-card div,
+  .deity-section,
+  .deity-comment-admin,
+  .qr-panel {
+    padding: 10px;
+  }
+
+  .deity-card h2 {
+    font-size: 17px;
+  }
+
+  .deity-card p {
+    font-size: 13px;
+  }
+
+  .deity-admin-row {
+    grid-template-columns: 48px 1fr auto auto;
+  }
+}

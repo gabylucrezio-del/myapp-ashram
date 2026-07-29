@@ -76,6 +76,7 @@ import { auth, db, firebaseConfig, firestoreDb, storage } from "./firebase";
 import BookStudio from "./BookStudio";
 import CuadernoAshram from "./CuadernoAshram";
 import GaneshaGuia from "./GaneshaGuia";
+import { DeitiesAdmin, DeitiesPage, DeityCommentsAdmin } from "./Deities";
 import ganeshaGuideImage from "./assets/avatar/ganesha_guia01.png";
 import { parseEpubBuffer } from "./epubParser";
 import TestDosha from "./TestDosha";
@@ -118,6 +119,7 @@ const GOOGLE_DRIVE_API_KEY = import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || "";
 const DEFAULT_LIVE_VIDEO = import.meta.env.VITE_ASHRAM_LIVE_VIDEO || "";
 const MAIN_MENU_CONFIG_PATH = "config/menuPrincipal";
 const APP_SETTINGS_PATH = "config/appSettings";
+const DEITIES_VIEW = "deidades";
 const STORE_SOCIAL_LINKS_PATH = "config/tiendaRedes";
 const DEFAULT_STORE_SETTINGS = {
   instagram: "",
@@ -350,6 +352,7 @@ const sections = [
   { id: "ejercicios", label: "Ejercicios", phrase: "El cuerpo tambien recuerda la luz.", icon: Dumbbell, iconSrc: "/icono_ejercicios.webp" },
   { id: "meditaciones", label: "Meditacion", phrase: "Respira. El centro siempre espera.", icon: Headphones, iconSrc: "/icono_meditacion.webp" },
   { id: "satsang", label: "Satsang", phrase: "La presencia compartida enciende el alma.", icon: Heart, iconSrc: "/satsang.webp" },
+  { id: "deidades", label: "Deidades", phrase: "Historias, rituales y ofrendas para honrar lo sagrado.", icon: Sparkles },
   { id: "en-vivo", label: "En Vivo", phrase: "El instante nos reune en conciencia.", icon: Video, iconSrc: "/icono_en_vivo.svg" },
   { id: "sesiones", label: "Sesiones", phrase: "Un espacio privado para tu camino.", icon: CalendarDays },
   { id: "tienda", label: "Tienda", phrase: "Elementos para honrar tu practica.", icon: ShoppingBag, iconSrc: "/icono_tienda.svg" },
@@ -363,6 +366,8 @@ const adminSections = [
   { id: "meditaciones", label: "Meditacion", icon: Headphones, iconSrc: "/icono_meditacion.webp" },
   { id: "satsang", label: "Satsang", icon: Heart, iconSrc: "/satsang.webp" },
   { id: "blog", label: "Blog", icon: Newspaper, iconSrc: "/icono_blog.webp" },
+  { id: "deidades", label: "Deidades", icon: Sparkles },
+  { id: "deity-comments", label: "Comentarios de Deidades", icon: MessageCircle },
   { id: "banners", label: "Banners", icon: ImageIcon },
   { id: "usuarios", label: "Usuarios", icon: User },
   { id: "libros", label: "Libros", icon: BookOpen },
@@ -374,6 +379,7 @@ const adminSections = [
 export default function App() {
   const [authState, setAuthState] = useState({ loading: true, user: null, profile: null });
   const [view, setView] = useState(hashView());
+  const [deitySlug, setDeitySlug] = useState(deitySlugFromLocation());
   const [menuConfig, setMenuConfig] = useState(defaultMainMenuConfig);
   const [appSettings, setAppSettings] = useState(() => readAppSettings());
   const [toast, setToast] = useState("");
@@ -527,8 +533,11 @@ export default function App() {
   }, [authState.profile?.rol, authState.profile?.email, authState.user?.email]);
 
   useEffect(() => {
-    window.history.replaceState({ view }, "", `#${view}`);
-    const onPopState = () => setView(hashView());
+    if (!isDeityPath()) window.history.replaceState({ view }, "", `#${view}`);
+    const onPopState = () => {
+      setView(hashView());
+      setDeitySlug(deitySlugFromLocation());
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -597,6 +606,21 @@ export default function App() {
     }
     window.history.pushState({ view: nextView, from: view }, "", `#${nextView}`);
     setView(nextView);
+    if (nextView !== DEITIES_VIEW) setDeitySlug("");
+  }
+
+  function openDeityRoute(slug) {
+    const cleanSlug = cleanText(slug);
+    const path = cleanSlug ? `/deidades/${encodeURIComponent(cleanSlug)}` : "/deidades";
+    window.history.pushState({ view: DEITIES_VIEW, deitySlug: cleanSlug, from: view }, "", path);
+    setView(DEITIES_VIEW);
+    setDeitySlug(cleanSlug);
+  }
+
+  function backToDeitiesList() {
+    window.history.pushState({ view: DEITIES_VIEW, deitySlug: "", from: view }, "", "/deidades");
+    setView(DEITIES_VIEW);
+    setDeitySlug("");
   }
 
   function returnToPrevious(defaultView = "home") {
@@ -697,6 +721,17 @@ export default function App() {
         {effectiveView === "ejercicios" && <Contenido coleccion="ejercicios" titulo="Ejercicios" profile={effectiveProfile} onBack={() => returnToPrevious("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
         {effectiveView === "meditaciones" && <Meditaciones user={authState.user} profile={effectiveProfile} onBack={() => returnToPrevious("home")} onToast={notify} onShare={openShare} />}
         {effectiveView === "satsang" && <Contenido coleccion="satsang" titulo="Satsang" user={authState.user} profile={effectiveProfile} onBack={() => returnToPrevious("home")} onToast={notify} onSubscribe={startSubscription} onShare={openShare} />}
+        {effectiveView === "deidades" && (
+          <DeitiesPage
+            user={authState.user}
+            profile={effectiveProfile}
+            slug={deitySlug}
+            onOpenDeity={openDeityRoute}
+            onBackToList={backToDeitiesList}
+            onBack={() => returnToPrevious("app-hub")}
+            onToast={notify}
+          />
+        )}
         {effectiveView === "en-vivo" && <EnVivo user={authState.user} profile={effectiveProfile} onBack={() => returnToPrevious("home")} onToast={notify} />}
         {effectiveView === "sesiones" && <Sesiones user={authState.user} profile={effectiveProfile} onBack={() => returnToPrevious("home")} onToast={notify} />}
         {effectiveView === "tienda" && <Tienda user={authState.user} profile={effectiveProfile} onBack={() => returnToPrevious("home")} onToast={notify} />}
@@ -1673,6 +1708,14 @@ function AppHub({ profile, menuConfig, setView, onBack }) {
       icon: Newspaper,
       emoji: "\uD83D\uDCDD",
       views: ["blog"],
+    },
+    {
+      id: "deidades",
+      label: "Deidades",
+      text: "Rituales y ofrendas",
+      icon: Sparkles,
+      emoji: "\uD83E\uDEB7",
+      views: ["deidades"],
     },
     {
       id: "participar",
@@ -4834,7 +4877,7 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
   const dataPath = adminDataPath(section);
 
   useEffect(() => {
-    if (section === "cuaderno" || section === "libros" || section === "configuracion" || section === "analiticas") {
+    if (section === "cuaderno" || section === "libros" || section === "configuracion" || section === "analiticas" || section === "deidades" || section === "deity-comments") {
       setItems([]);
       return;
     }
@@ -4846,7 +4889,7 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
   }, []);
 
   async function refresh() {
-    if (section === "cuaderno" || section === "libros" || section === "configuracion" || section === "analiticas") return;
+    if (section === "cuaderno" || section === "libros" || section === "configuracion" || section === "analiticas" || section === "deidades" || section === "deity-comments") return;
     setItems(await loadList(dataPath));
     if (["conocimiento", "ejercicios"].includes(section)) refreshCourseSeries();
   }
@@ -4885,7 +4928,7 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
           </button>
         ))}
       </div>
-      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "analiticas" ? (
+      {section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "analiticas" && section !== "deidades" && section !== "deity-comments" ? (
         <button className="primary" onClick={() => setEditing({})}>
           <Plus size={18} /> Nuevo
         </button>
@@ -4915,7 +4958,7 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
           onToast={onToast}
         />
       ) : null}
-      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "analiticas" && section !== "tienda" && section !== "ganesha-guia-knowledge" && (
+      {editing && section !== "usuarios" && section !== "cuaderno" && section !== "libros" && section !== "configuracion" && section !== "analiticas" && section !== "deidades" && section !== "deity-comments" && section !== "tienda" && section !== "ganesha-guia-knowledge" && (
         <AdminForm
           key={`${section}-${editing.id || "new"}`}
           section={section}
@@ -4936,6 +4979,10 @@ function Admin({ profile, menuConfig, appSettings, onToast, onBack }) {
         <MenuSettingsAdmin menuConfig={menuConfig} appSettings={appSettings} onToast={onToast} />
       ) : section === "analiticas" ? (
         <AnalyticsDashboard />
+      ) : section === "deidades" ? (
+        <DeitiesAdmin profile={profile} onToast={onToast} />
+      ) : section === "deity-comments" ? (
+        <DeityCommentsAdmin profile={profile} onToast={onToast} />
       ) : section === "ganesha-guia-knowledge" ? (
         <GaneshaKnowledgeAdmin items={items} onEdit={setEditing} onDelete={deleteItem} />
       ) : section === "cuaderno" ? (
@@ -8599,6 +8646,7 @@ function sectionSubtitle(id) {
     ejercicios: "Practicas simples para habitar el cuerpo.",
     meditaciones: "Un momento para volver al centro.",
     satsang: "Encuentros, palabras y presencia compartida.",
+    deidades: "Historias, rituales y ofrendas para honrar lo sagrado.",
     "en-vivo": "Satsang y comunidad en tiempo real.",
     tienda: "Productos del Ashram para acompanar tu practica.",
     ofrendas: "Una colaboracion voluntaria para sostener el Ashram.",
@@ -10158,6 +10206,7 @@ function isCourseOpen(modules) {
 }
 
 function hashView() {
+  if (isDeityPath()) return DEITIES_VIEW;
   if (storeProductIdFromUrl()) return "tienda";
   const value = window.location.hash.replace("#", "").split("/")[0];
   return value || "home";
@@ -10166,6 +10215,18 @@ function hashView() {
 function hashDetailId(view) {
   const [hashViewName, id] = window.location.hash.replace("#", "").split("/");
   return hashViewName === view ? id || "" : "";
+}
+
+function isDeityPath() {
+  return window.location.pathname === "/deidades" || window.location.pathname.startsWith("/deidades/");
+}
+
+function deitySlugFromLocation() {
+  if (window.location.pathname.startsWith("/deidades/")) {
+    return decodeURIComponent(window.location.pathname.split("/").filter(Boolean)[1] || "");
+  }
+  const [hashViewName, slug] = window.location.hash.replace("#", "").split("/");
+  return hashViewName === DEITIES_VIEW ? cleanText(slug) : "";
 }
 
 async function deleteStoragePath(path) {
