@@ -5056,6 +5056,81 @@ a.primary {
   margin-bottom: 10px;
 }
 
+.daily-movement-card {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-hour-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 8px;
+}
+
+.daily-hour-grid article {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  border-radius: 8px;
+  background: #fff8e7;
+  color: #5e5a2e;
+}
+
+.daily-hour-grid span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.daily-hour-grid strong {
+  color: var(--sacred-violet);
+  font-size: 20px;
+}
+
+.daily-movement-list {
+  display: grid;
+  gap: 7px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.daily-movement-list article {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 9px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid rgba(216, 199, 160, 0.52);
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.daily-movement-list time {
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(127, 155, 97, 0.13);
+  color: var(--olive);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.daily-movement-list span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.daily-movement-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-movement-list small {
+  color: #6c6840;
+}
+
 .analytics-kpi,
 .analytics-card,
 .analytics-online-panel,

@@ -6317,6 +6317,7 @@ function AnalyticsDashboard() {
         <AnalyticsRanking title="Donde se quedaron mas tiempo" icon={BarChart3} items={dailySummary.durationItems} />
       </div>
       <DailyAnalyticsBreakdown summary={dailySummary} />
+      <DailyMovementTimeline events={dailySummary.timeline} hourlyItems={dailySummary.hourlyItems} selectedDay={selectedDay} />
       <section className="analytics-card analytics-wide">
         <div className="admin-list-head">
           <strong>Movimiento de los ultimos 7 dias</strong>
@@ -6373,6 +6374,36 @@ function DailyAnalyticsBreakdown({ summary }) {
         <span>Registros <strong>{summary.counts.signup_success || 0}</strong></span>
       </div>
       {!summary.totalEvents ? <p className="empty-state">Todavia no hay datos para este dia. Los datos internos aparecen cuando usuarios registrados interactuan con la app.</p> : null}
+    </section>
+  );
+}
+
+function DailyMovementTimeline({ events, hourlyItems, selectedDay }) {
+  return (
+    <section className="analytics-card analytics-wide daily-movement-card">
+      <div className="admin-list-head">
+        <strong>Movimiento del dia</strong>
+        <small>{formatAnalyticsDay(selectedDay)} - acciones ordenadas por horario.</small>
+      </div>
+      <div className="daily-hour-grid">
+        {hourlyItems.length ? hourlyItems.map((item) => (
+          <article key={item.hour}>
+            <span>{item.hour}</span>
+            <strong>{item.count}</strong>
+          </article>
+        )) : <p className="empty-state">Sin movimiento por horarios para esta fecha.</p>}
+      </div>
+      <div className="daily-movement-list">
+        {events.length ? events.map((event) => (
+          <article key={event.id}>
+            <time>{event.timeLabel}</time>
+            <span>
+              <strong>{event.title}</strong>
+              <small>{event.actionLabel} - {event.category}</small>
+            </span>
+          </article>
+        )) : <p className="empty-state">Todavia no hay movimientos registrados para este dia.</p>}
+      </div>
     </section>
   );
 }
@@ -6515,6 +6546,7 @@ function buildDailyAnalyticsSummary(events = []) {
   const storeEvents = events.filter((event) => ["store_view", "tienda_open", "product_view", "add_to_cart", "store_product_shared", "whatsapp_order_click", "whatsapp_order_confirmed", "begin_checkout"].includes(event.eventType));
   const platformEvents = events.filter((event) => ["app_open", "open_section", "open_course", "open_meditation", "open_book", "open_video", "search_content", "click_related_resource"].includes(event.eventType));
   const durationEvents = events.filter((event) => event.eventType === "section_time" && Number(event.durationMinutes || 0) > 0);
+  const timeline = buildDailyMovementTimeline(events);
   return {
     totalEvents: events.length,
     counts,
@@ -6527,6 +6559,8 @@ function buildDailyAnalyticsSummary(events = []) {
     storeItems: rankDailyEvents(storeEvents, "store").slice(0, 8),
     platformItems: rankDailyEvents(platformEvents, "platform").slice(0, 8),
     durationItems: rankDurationEvents(durationEvents).slice(0, 8),
+    timeline,
+    hourlyItems: buildHourlyMovement(timeline),
   };
 }
 
@@ -6564,6 +6598,103 @@ function rankDurationEvents(events = []) {
     ranked.set(key, current);
   });
   return [...ranked.values()].sort((a, b) => b.count - a.count);
+}
+
+function buildDailyMovementTimeline(events = []) {
+  return [...events]
+    .sort((a, b) => analyticsEventMillis(b) - analyticsEventMillis(a))
+    .slice(0, 80)
+    .map((event) => ({
+      id: event.id,
+      title: analyticsMovementTitle(event),
+      actionLabel: analyticsEventLabel(event.eventType),
+      category: analyticsMovementCategory(event),
+      timeLabel: analyticsEventTime(event),
+      hourKey: analyticsEventHour(event),
+    }));
+}
+
+function buildHourlyMovement(events = []) {
+  const counts = new Map();
+  events.forEach((event) => {
+    const hour = event.hourKey || "sin hora";
+    counts.set(hour, (counts.get(hour) || 0) + 1);
+  });
+  return [...counts.entries()]
+    .map(([hour, count]) => ({ hour, count }))
+    .sort((a, b) => a.hour.localeCompare(b.hour));
+}
+
+function analyticsMovementTitle(event = {}) {
+  if (event.eventType === "section_time") {
+    const minutes = Number(event.durationMinutes || 0);
+    return `${event.contentTitle || sectionLabel(event.contentId) || "Seccion"}${minutes ? ` (${minutes} min)` : ""}`;
+  }
+  return event.productName || event.contentTitle || event.searchQuery || event.question || sectionLabel(event.contentId) || event.eventType || "Movimiento";
+}
+
+function analyticsMovementCategory(event = {}) {
+  if (["store_view", "tienda_open", "product_view", "add_to_cart", "store_product_shared", "whatsapp_order_click", "whatsapp_order_confirmed", "begin_checkout"].includes(event.eventType)) return "Tienda";
+  if (["open_post", "open_article", "open_content"].includes(event.eventType)) return "Publicacion";
+  if (event.eventType === "ask_ganesha") return "Ganesha Guia";
+  if (event.eventType === "signup_success") return "Registro";
+  if (event.eventType === "login_success") return "Sesion";
+  return event.category || event.contentCategory || event.contentType || "App del Ashram";
+}
+
+function analyticsEventLabel(eventType = "") {
+  const labels = {
+    landing_view: "Abrieron portada",
+    app_open: "Entraron a la app",
+    tienda_open: "Entraron a tienda",
+    store_view: "Vieron tienda",
+    product_view: "Vieron producto",
+    add_to_cart: "Agregaron al carrito",
+    store_product_shared: "Compartieron producto",
+    whatsapp_order_click: "Pulsaron WhatsApp",
+    whatsapp_order_confirmed: "Pedido por WhatsApp",
+    begin_checkout: "Iniciaron compra",
+    open_section: "Abrieron seccion",
+    section_time: "Tiempo en seccion",
+    open_post: "Leyeron post",
+    open_article: "Leyeron articulo",
+    open_content: "Abrieron contenido",
+    open_course: "Abrieron curso",
+    open_meditation: "Abrieron meditacion",
+    open_book: "Abrieron libro",
+    open_video: "Vieron video",
+    search_content: "Buscaron contenido",
+    ask_ganesha: "Usaron Ganesha Guia",
+    login_success: "Inicio de sesion",
+    signup_success: "Nuevo registro",
+    continue_as_guest: "Continuaron sin cuenta",
+    deity_shared: "Compartieron deidad",
+  };
+  return labels[eventType] || eventType || "Movimiento";
+}
+
+function analyticsEventMillis(event = {}) {
+  return firestoreDate(event.timestamp)?.getTime() || firestoreDate(event.createdAt)?.getTime() || 0;
+}
+
+function analyticsEventTime(event = {}) {
+  const date = firestoreDate(event.timestamp) || firestoreDate(event.createdAt);
+  if (!date) return "--:--";
+  return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function analyticsEventHour(event = {}) {
+  const date = firestoreDate(event.timestamp) || firestoreDate(event.createdAt);
+  if (!date) return "sin hora";
+  return `${String(date.getHours()).padStart(2, "0")}:00`;
+}
+
+function formatAnalyticsDay(value) {
+  if (!value) return "Sin fecha";
+  const [year, month, day] = value.split("-").map(Number);
+  const date = year && month && day ? new Date(year, month - 1, day) : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("es-AR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 }
 
 function todayDateKey() {
